@@ -34,9 +34,20 @@ def _parse_cli():
     parser.add_argument('--probe', action='store_true',
                         help='with --doctor: also ask connected devices a few '
                              'read-only questions (close Deadband first)')
+    parser.add_argument('--dump-registers', metavar='FILE',
+                        help='read-only: save the connected pad\'s active-profile and '
+                             'global registers to FILE (close Deadband first)')
+    parser.add_argument('--diff-registers', nargs=2, metavar=('BEFORE', 'AFTER'),
+                        help='show which registers differ between two dumps')
     parser.add_argument('--version', action='version',
                         version=f'%(prog)s {__version__}')
     options, passthrough = parser.parse_known_args()
+    if options.dump_registers:
+        from doctor import dump_registers
+        raise SystemExit(dump_registers(options.dump_registers))
+    if options.diff_registers:
+        from doctor import diff_registers
+        raise SystemExit(diff_registers(*options.diff_registers))
     if options.doctor:
         from doctor import run_cli
         raise SystemExit(run_cli())

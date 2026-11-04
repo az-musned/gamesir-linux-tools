@@ -729,6 +729,59 @@ def _probe_register_map():
     return out
 
 
+def dump_registers(path):
+    """`deadband --dump-registers PATH`: read-only dump of the active profile's
+    bank and the global bank of the (single) connected family-protocol pad."""
+    import hidcompat as hid
+    import controller_profile as profiles
+    from gs_common import find_controllers
+    from vendors.gamesir import regdump
+    pads = [(c, profiles.detect_one(c['pid'], c.get('product'))) for c in find_controllers()]
+    pads = [(c, p) for c, p in pads if p is not None and p.write_style == 'cyclone' and c['nodes']]
+    if len(pads) != 1:
+        print(f'Need exactly one connected GameSir pad on the family protocol; found {len(pads)}.')
+        return 1
+    c, prof = pads[0]
+    dev = hid.device()
+    try:
+        dev.open_path(c['nodes'][0].encode())
+        dev.set_nonblocking(True)
+    except Exception as e:
+        print(f'Could not open the controller ({e}). Close Deadband and GameSir Connect.')
+        return 1
+    try:
+        d = regdump.dump(dev, prof, _ask_family, _wake_family)
+    except OSError as e:
+        print(f'Dump failed: {e}')
+        return 1
+    finally:
+        try:
+            dev.close()
+        except Exception:
+            pass
+    d['usb'] = {'pid': f'{c["pid"]:04x}', 'product': c.get('product') or '',
+                'bcd': c.get('bcd')}
+    regdump.save(d, path)
+    print(f'Read {len(d["bytes"])} bytes of profile {d["profile"]} + global bank '
+          f'from {prof.short} into {path}'
+          + (f' ({len(d["unread"])} chunks unreadable)' if d['unread'] else ''))
+    return 0
+
+
+def diff_registers(a_path, b_path):
+    """`deadband --diff-registers A B`: what changed between two dumps."""
+    import controller_profile as profiles
+    from vendors.gamesir import regdump
+    a, b = regdump.load(a_path), regdump.load(b_path)
+    prof = next((p for p in profiles.ALL if p.name == a.get('model')), None)
+    try:
+        print(regdump.format_diff(regdump.diff(a, b, prof), a, b))
+    except ValueError as e:
+        print(e)
+        return 1
+    return 0
+
+
 def _probe_gamesir_portable():
     """The family's three read questions to every GameSir controller found,
     over whichever path Deadband itself would use (HID, or raw USB)."""

@@ -208,6 +208,21 @@ def selftest():
         checks.append(msg)
         print('  ok  ' + msg, flush=True)
 
+    # read-only register dump + diff (before the reader owns the pad)
+    import doctor
+    from vendors.gamesir import regdump
+    a_path, b_path = os.path.join(tmp, 'before.json'), os.path.join(tmp, 'after.json')
+    assert doctor.dump_registers(a_path) == 0
+    l4 = dict(prof.MACRO_SLOTS)['L4']
+    pad.banks[1][l4 + 6] = 0x01             # what "loop" might change in GameSir Connect
+    assert doctor.dump_registers(b_path) == 0
+    assert not any(f[1] in (0x03, 0x07) for f in pad.frames), 'the dump wrote or switched'
+    rows = regdump.diff(regdump.load(a_path), regdump.load(b_path), prof)
+    assert [(r[1], r[3], r[4]) for r in rows] == [(l4 + 6, 1, 'L4 block +0x06 (UNKNOWN +6)')], rows
+    pad.banks[1][l4 + 6] = 0x00
+    ok('read-only register dump + diff found the one changed byte: ' + rows[0][4])
+    pad.frames.clear()
+
     threading.Thread(target=reader.read_controller, daemon=True).start()
     _wait(lambda: state.get('driving') and state.get('mode_ok') and state.get('profile'),
           15, 'the reader to open the vendor collection and stream')

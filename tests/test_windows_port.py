@@ -299,3 +299,38 @@ class RealWindowsApi(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RegisterDumpLabels(unittest.TestCase):
+    """vendors.gamesir.regdump: naming what moved between two read-only dumps."""
+
+    def setUp(self):
+        from vendors.gamesir import regdump
+        self.r = regdump
+        self.prof = profiles.TARANTULA_PRO_8K
+        self.base = dict(self.prof.MACRO_SLOTS)
+
+    def test_block_fields(self):
+        self.assertEqual(self.r.label(self.prof, 1, self.base['C2'] + 0x05),
+                         'C2 block +0x05 (macro enable)')
+        self.assertEqual(self.r.label(self.prof, 1, self.base['T3'] + 0x07),
+                         'T3 block +0x07 (UNKNOWN +7)')
+        self.assertEqual(self.r.label(self.prof, 1, self.base['L4'] + 0x09 + 5 + 1),
+                         'L4 block +0x0f (macro step 2 hold hi)')
+
+    def test_mapped_and_global(self):
+        self.assertEqual(self.r.label(self.prof, 1, self.prof.POLL_RATE), 'Poll rate')
+        self.assertTrue(self.r.label(self.prof, 0x20, 0x11).startswith('global bank'))
+
+    def test_diff_refuses_different_profiles(self):
+        a = {'bank': 1, 'profile': 1, 'bytes': {}}
+        b = {'bank': 2, 'profile': 2, 'bytes': {}}
+        with self.assertRaises(ValueError):
+            self.r.diff(a, b, self.prof)
+
+    def test_diff_lists_only_changes(self):
+        a = {'bank': 1, 'profile': 1, 'bytes': {'01:00b8': 0, '01:00b9': 3}}
+        b = {'bank': 1, 'profile': 1, 'bytes': {'01:00b8': 1, '01:00b9': 3}}
+        [(bank, addr, old, new, where)] = self.r.diff(a, b, self.prof)
+        self.assertEqual((bank, addr, old, new), (1, 0xb8, 0, 1))
+        self.assertIn('L4 block +0x06', where)

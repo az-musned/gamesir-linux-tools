@@ -141,6 +141,26 @@ The Tarantula **T3CE** shares the Pro 8K's USB id `3537:103d`. The project
 hasn't confirmed that it shares the Pro 8K's register layout, which is exactly
 what this check is for.
 
+## Decoding an option GameSir Connect has (read-only)
+
+GameSir Connect offers per-macro options Deadband doesn't edit yet: **loop**,
+and the trigger mode **single press / hold to activate**. Finding where the pad
+stores them needs no capture driver. Dump the pad's registers, change one option
+in GameSir Connect, dump again, and diff:
+
+```powershell
+.\deadband-console.exe --dump-registers before.json
+#   ...open GameSir Connect, change ONE option on ONE button, apply, close it...
+.\deadband-console.exe --dump-registers after.json
+.\deadband-console.exe --diff-registers before.json after.json
+```
+
+The dump only reads. It sends the heartbeat, the active-profile query and
+register reads, and never switches profile, so it covers the **active
+profile** plus the global bank `0x20`. Keep the pad on the same profile for
+both dumps. The diff names each changed byte by its place in the map, e.g.
+`L4 block +0x06 (UNKNOWN +6)`. Close Deadband and GameSir Connect while dumping.
+
 ## Trying the UI without a controller
 
 `python tools\sim_tarantula.py` opens the full app driven by a **simulated**

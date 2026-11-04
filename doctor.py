@@ -20,6 +20,7 @@ Dependency-light on purpose: stdlib + hid only, NO Qt — it must run headless
 
 import glob
 import os
+import hostos
 import platform
 import stat
 import sys
@@ -299,7 +300,7 @@ def classify_open_failure(node):
     Without Linux's device files (macOS) there's no permission to fix: a raw
     USB path fails for want of PyUSB/libusb-package ('needs-usb-lib'), anything
     else because another app has the controller ('mac-open')."""
-    if not sys.platform.startswith('linux'):
+    if not hostos.HAS_DEVICE_PERMISSIONS:
         try:
             import rawhid
             if str(node).startswith(rawhid.PREFIX) and not rawhid.available():
@@ -472,8 +473,7 @@ def _same_file(left, right):
 # how Deadband reaches each one.
 
 def _os_portable():
-    mac = platform.mac_ver()[0]
-    return f'macOS {mac}' if mac else f'{platform.system()} {platform.release()}'
+    return hostos.os_description()
 
 
 def _collect_portable():
@@ -503,10 +503,19 @@ def _collect_portable():
     for c in ctrls:
         prof = profiles.detect_one(c['pid'], c.get('product'))
         raw = any(n.startswith('usb:') for n in c['nodes'])
-        rep['controllers'].append({
+        entry = {
             'id': c['id'], 'pid': c['pid'], 'product': c.get('product') or '',
             'model': prof.short if prof else 'not recognised', 'bcd': c.get('bcd'),
-            'via': 'raw USB' if raw else 'HID', 'nodes': list(c['nodes'])})
+            'via': 'raw USB' if raw else 'HID', 'nodes': list(c['nodes'])}
+        if hostos.PER_COLLECTION_HID_PATHS:
+            entry['collections'] = _windows_collections(c)
+            if not c['nodes']:
+                hint = (' On the Tarantula, PC mode (3537:103d) is Home + X held for '
+                        '2 seconds.' if c['pid'] == 0x103C else '')
+                rep['verdict'].append(
+                    f'GameSir {c["pid"]:04x} has no vendor HID collection, so its '
+                    f'settings channel isn\'t reachable in this mode.{hint}')
+        rep['controllers'].append(entry)
         if raw and not rep['raw_usb']:
             rep['verdict'].append(
                 f'GameSir {c["pid"]:04x} is only reachable over raw USB, and PyUSB / '
@@ -521,6 +530,14 @@ def _collect_portable():
             if (d.get('usage_page') or 0) not in e['pages']:
                 e['pages'].append(d.get('usage_page') or 0)
     rep['logitech'] = list(logi.values())
+    if hostos.IS_WINDOWS:
+        rep['vendor_apps'] = hostos.running_vendor_apps()
+        if rep['vendor_apps']:
+            rep['verdict'].append(
+                'GameSir\'s own app is running (' + ', '.join(rep['vendor_apps']) + '). It '
+                'talks to the same command channel; close it (and its tray icon) before '
+                'using Deadband, or the two apps\' commands interleave.')
+    rep['write_gate'] = _write_gate_summary()
     if not ctrls and not rep['logitech']:
         rep['verdict'].append('No GameSir or Logitech devices found. Check the cable or '
                               'dongle, and that a wireless controller is switched on.')
@@ -536,8 +553,12 @@ def _format_portable(rep):
          f'- Deadband {rep.get("version", "?")}',
          f'- OS: {rep["os"]} ({rep.get("machine", "?")})',
          f'- Python {rep["python"]}, {rep.get("hidapi", "?")}',
+         ] + ([] if hostos.IS_WINDOWS else [
          '- Raw USB (PyUSB + libusb-package): '
-         + ('installed' if rep.get('raw_usb') else 'not installed'), '',
+         + ('installed' if rep.get('raw_usb') else 'not installed')]) + [
+         ] + ([f'- GameSir apps running: {", ".join(rep["vendor_apps"]) or "none"}']
+              if 'vendor_apps' in rep else []) + [
+         f'- Write approval: {rep.get("write_gate", "?")}', '',
          '### Devices']
     if not rep['controllers'] and not rep['logitech']:
         L.append('(no GameSir/Logitech devices found)')
@@ -545,11 +566,167 @@ def _format_portable(rep):
         fw = f'  firmware {c["bcd"] >> 8:x}.{c["bcd"] & 0xff:02x}' if c.get('bcd') else ''
         L.append(f'- GameSir {c["pid"]:04x} "{c["product"]}" -> {c["model"]}, '
                  f'via {c["via"]}{fw}  [{c["id"]}]')
+        for col in c.get('collections', []):
+            L.append(f'    {"*" if col["channel"] else " "} {col["summary"]}')
+        if c.get('collections'):
+            L.append('    (* = offered as a command channel)')
     for d in rep['logitech']:
         pages = ' '.join(f'0x{p:04x}' for p in d['pages'])
         L.append(f'- Logitech {d["pid"]:04x} "{d["product"]}" (usage pages {pages})')
     L += ['', '### Verdict'] + rep['verdict']
     return '\n'.join(L)
+
+
+def _windows_collections(ctrl):
+    """Every HID collection Windows exposes for one GameSir unit, with its
+    capabilities (read-only: queried without opening it for I/O)."""
+    import winhid
+    out = []
+    for col in ctrl.get('collections', []):
+        c = winhid.caps(col['path'])
+        mi, num = winhid.interface_number(col['path']), winhid.collection_number(col['path'])
+        where = (f'MI_{mi:02x} ' if mi is not None else '') + (f'Col{num:02x} ' if num is not None else '')
+        out.append({'path': col['path'], 'channel': col['path'] in ctrl['nodes'],
+                    'caps': c, 'summary': where + (winhid.describe(c) if c else
+                    f'page {col["usage_page"]:#06x} usage {col["usage"]:#06x} '
+                    '(capabilities unavailable)')})
+    return out
+
+
+def _write_gate_summary():
+    try:
+        import write_gate
+        if not write_gate.required():
+            return 'not required on this platform'
+        import json as _json
+        try:
+            with open(write_gate.store_path()) as fh:
+                approved = _json.load(fh).get('approved', {})
+        except (OSError, ValueError):
+            approved = {}
+        if not approved:
+            return 'required; no controller approved yet'
+        return 'required; approved: ' + '; '.join(
+            write_gate.describe(r['identity']) for r in approved.values() if 'identity' in r)
+    except Exception as e:
+        return f'unknown ({e!r})'
+
+
+def _ask_family(dev, cmd, kind, timeout=1.0, match=None):
+    """Send one READ-type command and return the first matching 0x10 reply."""
+    from gs_common import pad
+    dev.write(pad(*cmd))
+    end = time.time() + timeout
+    while time.time() < end:
+        r = dev.read(64)
+        if r and r[0] == 0x10 and len(r) > 1 and r[1] == kind and (match is None or match(r)):
+            return list(r)
+        time.sleep(0.003)
+    return None
+
+
+def _wake_family(dev):
+    from gs_common import pad
+    for _ in range(3):                  # spaced: a question sent right after a
+        dev.write(pad(0x0F, 0xF2))      # heartbeat is dropped
+        time.sleep(0.3)
+        while dev.read(64):
+            pass
+
+
+def _plausibility(prof, values):
+    """Judge register reads against the profile's map:
+    [(label, raw hex, verdict, ok)] -- ok is None for fields with no range check.
+    A different register layout under the same USB id would put unrelated bytes at
+    these addresses, which almost never all decode into range."""
+    labels = prof.field_labels()
+    dz_addrs = {a for a in (prof.LT_DZ_MIN, prof.LT_DZ_MAX, prof.LT_ADZ_MIN, prof.LT_ADZ_MAX,
+                            prof.RT_DZ_MIN, prof.RT_DZ_MAX, prof.RT_ADZ_MIN, prof.RT_ADZ_MAX,
+                            prof.ST_DZ_MIN, prof.ST_DZ_MAX, prof.ST_ADZ_MIN, prof.ST_ADZ_MAX,
+                            prof.RS_DZ_MIN, prof.RS_DZ_MAX, prof.RS_ADZ_MIN, prof.RS_ADZ_MAX)
+                if a is not None}
+    pct = {}
+    rows = []
+    for addr, data in sorted(values.items()):
+        label = labels.get(addr, f'0x{addr:04x}')
+        raw = ' '.join(f'{b:02x}' for b in data) if data is not None else 'no reply'
+        verdict, ok = '', None
+        if not data:
+            verdict, ok = 'NO REPLY', False
+        elif addr in dz_addrs:
+            v = ((data[0] << 8) | data[1]) / 10 if prof.dz_wide and len(data) >= 2 else data[0]
+            pct[addr] = v
+            ok = 0 <= v <= 100
+            verdict = f'{v:g}% ' + ('ok' if ok else 'OUT OF RANGE')
+        elif addr == prof.POLL_RATE:
+            ok = data[0] < len(prof.POLL_RATES or ())
+            verdict = (prof.POLL_RATES[data[0]] + ' ok') if ok else 'UNKNOWN CODE'
+        rows.append((label, raw, verdict, ok))
+    for lo, hi in ((prof.LT_DZ_MIN, prof.LT_DZ_MAX), (prof.RT_DZ_MIN, prof.RT_DZ_MAX),
+                   (prof.ST_DZ_MIN, prof.ST_DZ_MAX), (prof.RS_DZ_MIN, prof.RS_DZ_MAX)):
+        if lo in pct and hi in pct and pct[lo] > pct[hi]:
+            rows.append((f'{labels.get(lo, hex(lo))} <= max', '', 'MIN ABOVE MAX', False))
+        if hi in pct and pct[hi] == 0:
+            # an all-zero region decodes "in range" too; no pad ships (or lets
+            # you set) a 0 % maximum, so this is the tell for a wrong map
+            rows.append((f'{labels.get(hi, hex(hi))} > 0', '', 'ZERO MAXIMUM', False))
+    return rows
+
+
+def _probe_register_map():
+    """READ-ONLY check of the active profile against the register map Deadband
+    would use: reads every analog field of the ACTIVE profile (no profile switch,
+    no write) and judges whether the values decode sensibly."""
+    import hidcompat as hid
+    import controller_profile as profiles
+    from gs_common import find_controllers
+    out = ['### Probe: register map check (read-only, active profile only)']
+    for c in find_controllers():
+        prof = profiles.detect_one(c['pid'], c.get('product'))
+        if prof is None or prof.write_style != 'cyclone' or not c['nodes']:
+            continue
+        out.append(f'- {c["pid"]:04x} "{c.get("product") or ""}" with the {prof.short} map')
+        dev = hid.device()
+        try:
+            dev.open_path(c['nodes'][0].encode())
+            dev.set_nonblocking(True)
+        except Exception as e:
+            out.append(f'    could not open ({e})')
+            continue
+        try:
+            _wake_family(dev)
+            r = _ask_family(dev, (0x0F, 0x0B), 0x0C)
+            if not r:
+                out.append('    no active-profile reply; skipped (asleep, or wrong mode?)')
+                continue
+            bank = prof.profile_bank(r[2])
+            out.append(f'    active profile {r[2]} (bank {bank})')
+            if bank is None:
+                continue
+            values = {}
+            for addr, ln in prof.read_fields():
+                rr = _ask_family(dev, (0x0F, 0x04, bank, addr >> 8, addr & 0xFF, ln), 0x05,
+                          match=lambda x, a=addr: ((x[3] << 8) | x[4]) == a)
+                values[addr] = rr[6:6 + rr[5]] if rr else None
+                time.sleep(0.02)
+            rows = _plausibility(prof, values)
+            bad = [r for r in rows if r[3] is False]
+            for label, raw, verdict, _ok in rows:
+                out.append(f'    {label:<34} {raw:<30} {verdict}')
+            out.append('    VERDICT: ' + ('every checked field decodes in range with this map'
+                                         if not bad else
+                                         f'{len(bad)} field(s) do NOT fit this map -- do not '
+                                         'enable writes; please report this output'))
+        except Exception as e:
+            out.append(f'    failed ({e!r})')
+        finally:
+            try:
+                dev.close()
+            except Exception:
+                pass
+    if len(out) == 1:
+        out.append('- no recognised family-protocol controller connected')
+    return out
 
 
 def _probe_gamesir_portable():
@@ -600,7 +777,7 @@ def _probe_gamesir_portable():
 
 def collect():
     """Gather the full diagnostic picture (structured)."""
-    if not sys.platform.startswith('linux'):
+    if not hostos.HAS_SYSFS:
         return _collect_portable()
     rep = {
         'app': 'Deadband',
@@ -1309,7 +1486,7 @@ def probe():
     the same devices."""
     lines = ['', '## Probe (read-only device questions; close Deadband first)']
     parts = ((_probe_gamesir, _probe_buttons, _probe_g7_unconfirmed, _probe_mouse)
-             if sys.platform.startswith('linux') else (_probe_gamesir_portable, _probe_mouse))
+             if hostos.HAS_SYSFS else (_probe_gamesir_portable, _probe_register_map, _probe_mouse))
     for part in parts:
         try:
             lines += [''] + part()

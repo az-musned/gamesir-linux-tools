@@ -25,6 +25,8 @@ from gs_state import state
 import backup
 import controller_profile as profiles
 import register_transaction
+import hostos
+import write_gate
 from vendors.gamesir import config as cfg, control
 class Wire:
     def __init__(self):
@@ -62,7 +64,8 @@ class ContinuousTriggerTests(unittest.TestCase):
         # Linux UI harness loads the complete QObject and real QML.
         tree = ast.parse((Path(__file__).parent / 'bridge.py').read_text(encoding='utf-8'))
         names = {'_apply_profile', '_build_config', '_queue', 'hasContinuousTrigger',
-                 'setContinuousTrigger', 'applyConfig', '_apply_transactional', '_fold'}
+                 'setContinuousTrigger', 'applyConfig', '_apply_transactional', '_fold',
+                 '_writes_locked'}
         constants = {'_SCALAR_FIELDS', '_CURVE_FIELDS', '_TRAJ_FIELDS', '_HAIR_FIELDS'}
         assignments = [n for n in tree.body if isinstance(n, ast.Assign)
                        and any(isinstance(t, ast.Name) and t.id in constants for t in n.targets)]
@@ -75,7 +78,8 @@ class ContinuousTriggerTests(unittest.TestCase):
             name='BridgeHarness', bases=[], keywords=[], body=methods, decorator_list=[])], type_ignores=[])
         scope = dict(copy=copy, os=os, time=time, threading=threading, cfg=cfg,
                      profiles=profiles, state=state, control=control, backup=backup,
-                     register_transaction=register_transaction)
+                     register_transaction=register_transaction, hostos=hostos,
+                     write_gate=write_gate)
         exec(compile(ast.fix_missing_locations(wrapper), 'bridge.py', 'exec'), scope)
         self.pad = scope['BridgeHarness']()
         self.pad._apply_profile(profiles.CYCLONE)

@@ -11,6 +11,19 @@ curated, user-facing summary; the complete history is in git. Format loosely fol
 - **G7 Pro Wuchang wireless configuration** on its `3537:10a8` receiver (#17).
 - A **Swap** setting on the Lights page for Cyclone 2 units whose Home and
   Profile lights are wired the other way round (#48).
+- **Windows support (early).** Deadband runs on Windows 10/11 from source or as
+  a standalone PyInstaller build (`packaging/windows/build.ps1`), through the
+  in-box HID driver: no driver install. Discovery handles Windows' one-path-per-
+  HID-collection layout (only the vendor collection is used as the command
+  channel; identical pads stay apart), and writes are fitted to each
+  collection's report length. Because it is not yet hardware-confirmed,
+  configuration writes start **locked per controller identity** (USB id, product
+  string, firmware) until the owner approves, which first backs up every
+  profile. `--doctor` on Windows lists each collection's report ids and
+  lengths, warns when GameSir's own app is running, and `--probe` adds a
+  read-only register-map check of the active profile. `tools/sim_tarantula.py`
+  simulates a Tarantula for UI testing and an end-to-end self-test. Platform
+  differences now live in `hostos.py`. Setup: [docs/windows.md](docs/windows.md).
 - **macOS support (early).** Deadband runs on macOS from source; tested on
   Apple Silicon with a Cyclone 2, a Tarantula Pro 8K and a G502 X (remaps,
   live input, profiles, lighting, mouse pages). A Cyclone 2 dongle there leaves

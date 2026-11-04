@@ -30,7 +30,10 @@ Needs read access to the controller's /dev/input/event* nodes - granted by the
 udev rule (TAG+="uaccess" on SUBSYSTEM=="input" for vendor 3537).
 """
 
-import fcntl
+try:
+    import fcntl              # EVIOCGRAB -- Linux only; start() is never called elsewhere
+except ImportError:
+    fcntl = None
 import os
 import re
 import threading

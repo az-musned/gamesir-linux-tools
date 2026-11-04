@@ -17,6 +17,7 @@ import argparse
 import os
 import sys
 import threading
+import hostos
 from version import __version__
 
 # Handle terminal options before importing Qt so help, version and diagnostics
@@ -86,10 +87,59 @@ def _migrate_settings():
     print(f'[deadband] migrated {len(keys)} setting(s) from "{_OLD_APP}"')
 
 
+def _windows_log():
+    """The windowed Windows build has no console (sys.stdout is None), so send
+    what the app prints -- reader session notes, QML warnings -- to
+    %LOCALAPPDATA%\\deadband\\deadband.log for bug reports (like macOS's
+    ~/Library/Logs/Deadband.log). Truncated each launch."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        folder = os.path.join(hostos.user_data_dir(), 'deadband')
+        os.makedirs(folder, exist_ok=True)
+        log = open(os.path.join(folder, 'deadband.log'), 'w', buffering=1,
+                   encoding='utf-8', errors='replace')
+        sys.stdout = sys.stdout or log
+        sys.stderr = sys.stderr or log
+    except OSError:
+        pass
+
+
+def _windows_setup():
+    """Windows-only process setup, before the QGuiApplication exists.
+
+    * An explicit AppUserModelID, so the taskbar groups Deadband under its own
+      icon instead of python.exe's.
+    * The Fusion Quick Controls style. Windows' native style refuses the
+      background/contentItem customisations the QML makes (and logs a warning
+      for each); Fusion is also what Linux gets by default, so the app looks
+      the same. QT_QUICK_CONTROLS_STYLE still overrides it."""
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Deadband.Deadband')
+    except Exception:
+        pass
+    if getattr(sys.stderr, 'name', '').endswith('deadband.log'):
+        # Qt writes its own messages (QML errors) to the C-level stderr, which a
+        # windowed process doesn't have: route them into the log too.
+        from PySide6.QtCore import qInstallMessageHandler
+
+        def _qt_message(_mode, ctx, msg):
+            where = f'{ctx.file}:{ctx.line}: ' if ctx.file else ''
+            print(where + msg, file=sys.stderr)
+        qInstallMessageHandler(_qt_message)
+    if not os.environ.get('QT_QUICK_CONTROLS_STYLE'):
+        from PySide6.QtQuickControls2 import QQuickStyle
+        QQuickStyle.setStyle('Fusion')
+
+
 def main():
+    if hostos.IS_WINDOWS:
+        _windows_log()
+        _windows_setup()
     # Background side: identical to the Dear PyGui app.
     threading.Thread(target=read_controller, daemon=True).start()
-    if sys.platform.startswith('linux'):
+    if hostos.HAS_EVDEV:
         # Press-to-select: switch the driven controller by pressing a button on
         # it. Watches evdev, which only Linux has; elsewhere the header picker.
         threading.Thread(target=press_select_loop, daemon=True).start()

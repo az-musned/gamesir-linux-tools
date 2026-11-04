@@ -15,6 +15,8 @@ Two cadences:
 import copy
 import json
 import os
+import hostos
+import write_gate
 import re
 import threading
 import time
@@ -343,7 +345,8 @@ class GamesirBridge(QObject):
         sig = (state['connected'], state['mode_ok'], state['battery'],
                state['charging'], state['profile'], state.get('edit_profile'), state['led_slot'],
                state['firmware'], state['controller'], state['wired'],
-               state.get('access'), state.get('config_claimed'), state.get('config_status'))
+               state.get('access'), state.get('config_claimed'), state.get('config_status'),
+               write_gate.status(), write_gate.key(write_gate.identity()))
         if sig != self._status_sig:
             self._status_sig = sig
             self.statusChanged.emit()
@@ -2177,7 +2180,7 @@ class GamesirBridge(QObject):
     @Slot(str, bool)
     def setMacroEnable(self, paddle, on):
         base = self._macro_base(paddle)
-        if base is None:
+        if base is None or self._writes_locked():
             return
         self._macros.setdefault(paddle, {'enable': False, 'events': []})['enable'] = bool(on)
         self._write_macro(base + macro.ENABLE_OFF, [1 if on else 0])
@@ -2186,7 +2189,7 @@ class GamesirBridge(QObject):
     def setMacroEvents(self, paddle, events):
         """Replace a paddle's whole event list (count + events written as one block)."""
         base = self._macro_base(paddle)
-        if base is None:
+        if base is None or self._writes_locked():
             return
         mx = self._prof.macro_max
         evs = [{'target': int(e['target']), 'hold': int(e['hold']), 'delay': int(e['delay'])}
@@ -2356,6 +2359,77 @@ class GamesirBridge(QObject):
             ''.join(c if c.isalnum() else '-' for c in short.lower()).split('-')))
         return f'deadband_{slug or "controller"}_{datetime.now():%Y%m%d-%H%M%S}.json'
 
+    # ---------------------------------------------------- write approval gate
+    @Property(str, notify=statusChanged)
+    def writeApproval(self):
+        """'' when this platform needs no approval (Linux/macOS) or no real
+        controller is driven; else 'locked' / 'backing-up' / 'approved' for the
+        connected controller's exact identity (write_gate.py)."""
+        if not write_gate.required() or state.get('demo') or write_gate.identity() is None:
+            return ''
+        if not profiles.is_recognized() or self._prof.write_style == 'none':
+            return ''                   # unrecognised / input-only: nothing to unlock
+        if self._prof.transport != 'hidraw' and not hostos.RAW_USB_CONFIG:
+            return ''                   # its settings channel isn't reachable here
+        return write_gate.status()
+
+    @Property(str, notify=statusChanged)
+    def writeIdentity(self):
+        return write_gate.describe()
+
+    @Property(str, notify=statusChanged)
+    def writeApprovalBackup(self):
+        return write_gate.approval_record().get('backup', '')
+
+    @Slot()
+    def approveWrites(self):
+        """The user's explicit approval: back the controller up in full, then --
+        only if that worked -- unlock writes for this exact identity."""
+        if self._backup_busy or state.get('demo'):
+            return
+        ident = write_gate.identity()
+        if ident is None or not write_gate.begin_backup():
+            return
+        os.makedirs(write_gate.backup_dir(), exist_ok=True)
+        name = self.defaultBackupName.replace('.json', '_before-first-write.json')
+        path = os.path.join(write_gate.backup_dir(), name)
+        self._backup_busy = True
+        self.backupBusyChanged.emit()
+        self.statusChanged.emit()
+
+        def done(ok, msg):
+            approved = write_gate.finish_backup(ok, path, ident)
+            if approved:
+                msg = (f'Backed up every profile to {path}. Configuration writes are '
+                       'now enabled for this controller.')
+            elif ok:
+                msg = ('The backup finished, but the controller changed meanwhile, so '
+                       'writes stay locked. Approve again.')
+            else:
+                msg = f'Writes stay locked: the backup failed. {msg}'
+            self._backup_done(approved, msg)
+            self.statusChanged.emit()
+
+        backup.export_async(path,
+                            on_progress=lambda d, t: self.backupProgress.emit(d, t),
+                            on_done=done)
+
+    def _writes_locked(self, report=True):
+        """True (and, with `report`, says so in the apply status line) while the
+        write gate holds this controller locked -- so a Save fails with the
+        reason instead of a generic write error, and staged edits are kept."""
+        if write_gate.required() and not state.get('demo') and write_gate.status() != write_gate.APPROVED:
+            if report:
+                self._set_apply_status('Writes are locked for this controller: use '
+                                       '"Back up & enable writes" in the banner first.')
+            return True
+        return False
+
+    @Slot()
+    def revokeWrites(self):
+        if write_gate.revoke():
+            self.statusChanged.emit()
+
     def _backup_done(self, ok, msg):
         self._backup_busy = False
         self.backupBusyChanged.emit()
@@ -2370,13 +2444,25 @@ class GamesirBridge(QObject):
             return
         self._backup_busy = True
         self.backupBusyChanged.emit()
+        on_done = self._backup_done
+        # Exporting walks every profile (0x0F 0x07). While writes are locked the
+        # gate lets exactly that through for the duration of this export -- the
+        # user asked for it -- without approving anything else.
+        if self._writes_locked(report=False) and write_gate.begin_backup():
+            def on_done(ok, msg):
+                write_gate.end_backup()
+                self._backup_done(ok, msg)
         backup.export_async(self._to_path(url),
                             on_progress=lambda d, t: self.backupProgress.emit(d, t),
-                            on_done=self._backup_done)
+                            on_done=on_done)
 
     @Slot(str)
     def importBackup(self, url):
         if self._backup_busy or (self._prof is profiles.G7_SE and not self._se_full_view()):
+            return
+        if self._writes_locked(report=False):
+            self.backupStatus.emit(False, 'Writes are locked for this controller: use '
+                                          '"Back up & enable writes" first.')
             return
         try:
             data = backup.load(self._to_path(url))
@@ -2821,6 +2907,8 @@ class GamesirBridge(QObject):
 
     @Slot()
     def applyConfig(self):
+        if self._writes_locked():
+            return
         # Every controller on the family register protocol saves through ONE
         # path: snapshot -> recovery file -> write -> read-back verify ->
         # rollback on failure (register_transaction). It used to be reserved for
@@ -2992,7 +3080,7 @@ class GamesirBridge(QObject):
 
         def run():
             try:
-                base = os.environ.get('XDG_DATA_HOME') or os.path.expanduser('~/.local/share')
+                base = hostos.user_data_dir()
                 # poll rate: written last, no read-back -- the 8K and Tarantula
                 # re-enumerate on this change (seen in USB captures and live)
                 # (the G7 SE doesn't re-enumerate, so its rate is read back)
@@ -3172,7 +3260,7 @@ class GamesirBridge(QObject):
         """Reset the active profile to defaults, then re-read so every page
         reflects it. Models with a captured factory image (Cyclone) restore the
         exact out-of-box bytes; others (8K) get a field-by-field default write."""
-        if not self.profileResetSupported or self._backup_busy:
+        if not self.profileResetSupported or self._backup_busy or self._writes_locked():
             return          # a Save, restore or reset-all walk is switching profiles
         bank = self._prof.profile_bank(state['profile'])
         if bank is None:
@@ -3198,6 +3286,10 @@ class GamesirBridge(QObject):
         whichever profile was active. Reports through the backup status channel (it
         lives in the same Backup & Restore panel)."""
         if not self.profileResetSupported or self._backup_busy:
+            return
+        if self._writes_locked(report=False):
+            self.backupStatus.emit(False, 'Writes are locked for this controller: use '
+                                          '"Back up & enable writes" first.')
             return
         prof = self._prof
         banks = prof.profile_banks
@@ -3267,6 +3359,8 @@ class GamesirBridge(QObject):
                 self._drop_profile_pending()
             self.statusChanged.emit()
         else:
+            if self._writes_locked():
+                return
             state['edit_profile'] = n
             control.set_profile(n)
 

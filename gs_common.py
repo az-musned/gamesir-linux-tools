@@ -15,6 +15,7 @@ import os
 import re
 import time
 import hidcompat as hid   # either python HID library; see hidcompat.py
+import hostos
 
 VENDOR_VID = 0x3537   # GameSir native vendor interface
 REPORT_LEN = 64       # 0x0F output report = report ID + 63 payload bytes
@@ -173,18 +174,27 @@ def find_controllers():
 
 
 def _find_controllers_portable():
-    """find_controllers() without Linux's sysfs (macOS): the same entries, built
-    from hidapi's list plus, when PyUSB is installed, the USB bus itself.
+    """find_controllers() without Linux's sysfs (macOS, Windows): the same
+    entries, built from hidapi's list plus, on macOS with PyUSB installed, the
+    USB bus itself.
 
-    hidapi gives each device one or more paths but no USB location, so its
+    hidapi gives each device one or more paths but no USB location. On macOS its
     entries are matched to a USB device by product id; that gives them the same
     `bus-port` ids as on Linux. A device whose HID interface has no system
     driver (a Cyclone dongle on macOS) has no hidapi entry at all, so it gets a
     rawhid `usb:` path instead. Two identical controllers can't be told apart by
     product id, so without a match they get numbered ids; `usb` is None, as the
-    raw G7 transports are Linux-only for now."""
+    raw G7 transports are Linux-only for now.
+
+    On Windows (see winhid.py) each top-level collection is its own path. Only
+    the vendor-page collections can carry the command channel -- Windows owns
+    the keyboard/mouse ones outright -- so those are the nodes offered, and the
+    collections are grouped into physical units by their device-instance id,
+    which also keeps two identical pads apart. Nothing is claimed over raw USB."""
+    if hostos.PER_COLLECTION_HID_PATHS:
+        return _find_controllers_windows()
     import rawhid
-    usb_devs = rawhid.devices(VENDOR_VID)
+    usb_devs = rawhid.devices(VENDOR_VID) if hostos.RAW_USB_HID_FALLBACK else []
     groups = {}                              # (pid, serial) -> hidapi entries
     try:
         listed = hid.enumerate()
@@ -217,6 +227,47 @@ def _find_controllers_portable():
                     'product': u['product'],
                     'nodes': [rawhid.path_for(u['port'], i) for i in u['hid_interfaces']],
                     'usb': None, 'bcd': u['bcd']})
+    return out
+
+
+def _find_controllers_windows(listed=None):
+    """Windows discovery (see _find_controllers_portable). `listed` replaces
+    hid.enumerate() for tests.
+
+    Each entry also carries `collections`: every collection path of the unit
+    with its usage page, so the diagnostics can show what Windows exposes
+    without re-enumerating."""
+    import winhid
+    if listed is None:
+        try:
+            listed = hid.enumerate(VENDOR_VID, 0)
+        except Exception:
+            listed = []
+    units = {}                               # (pid, unit key) -> hidapi entries
+    for d in listed:
+        if d.get('vendor_id') != VENDOR_VID:
+            continue
+        p = d.get('path')
+        p = p.decode(errors='replace') if isinstance(p, bytes) else (p or '')
+        if not p:
+            continue
+        units.setdefault((d.get('product_id'), winhid.unit_key(p)), []).append((p, d))
+    out = []
+    for (pid, key), entries in sorted(units.items(), key=lambda u: (u[0][0], u[0][1])):
+        entries.sort(key=lambda e: (-(e[1].get('usage_page') or 0), e[0]))
+        nodes = []
+        for p, d in entries:
+            if winhid.is_vendor_page(d.get('usage_page')) and p not in nodes:
+                nodes.append(p)
+        first = entries[0][1]
+        uid = f'win-{pid:04x}-{key}'
+        out.append({'id': uid, 'port': uid, 'pid': pid,
+                    'product': first.get('product_string') or '',
+                    'nodes': nodes, 'usb': None,
+                    'bcd': first.get('release_number') or None,
+                    'interface': winhid.interface_number(entries[0][0]),
+                    'collections': [{'path': p, 'usage_page': d.get('usage_page') or 0,
+                                     'usage': d.get('usage') or 0} for p, d in entries]})
     return out
 
 
@@ -278,6 +329,8 @@ def device_bcd(devnode):
 
     A display/labelling helper: firmware_version builds on it to pin a version
     string to one physical unit."""
+    if not hostos.HAS_SYSFS:
+        return None                 # no sysfs: the bcd comes from hidapi's list
     name = os.path.basename(devnode)
     devdir = _usb_device_dir(os.path.join('/sys/class/hidraw', name))
     if devdir is None:
@@ -292,6 +345,8 @@ def device_pid(devnode):
     """USB idProduct (int) for the device that owns a /dev/hidrawN node, or None.
     Lets a caller identify the exact model behind a node — e.g. the flasher
     refusing a non-Cyclone before it sends the loader command."""
+    if not hostos.HAS_SYSFS:
+        return None
     name = os.path.basename(devnode)
     devdir = _usb_device_dir(os.path.join('/sys/class/hidraw', name))
     if devdir is None:

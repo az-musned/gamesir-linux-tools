@@ -9,7 +9,6 @@ switches, and hidraw node renumbering on re-enumeration.
 """
 
 import errno
-import fcntl
 import math
 import os
 import select
@@ -18,13 +17,19 @@ import sys
 import threading
 import time
 import hidcompat as hid   # either python HID library; see hidcompat.py
+import hostos
+try:
+    import fcntl              # evdev ioctls -- Linux only (hostos.HAS_EVDEV)
+except ImportError:           # Windows: the evdev paths below are never taken
+    fcntl = None
 
 from gs_common import (find_controllers, pick_live_node, firmware_version,
-                       device_bcd, evdev_port, has_live_pad)
+                       device_bcd, evdev_port, has_live_pad, VENDOR_VID)
 from vendors.gamesir.enhanced import parse_enhanced
 from gs_state import state
 import vendors.gamesir.control as control
 import controller_profile as profiles
+import write_gate
 from vendors.gamesir.models.g7pro import protocol as g7pro
 from vendors.gamesir.models.kaleid import protocol as kaleid
 from vendors.gamesir.models.g7se import protocol as g7se
@@ -297,6 +302,7 @@ def read_controller():
             state['config_phase'] = ''
             state['usb_bcd'] = None
             profiles.set_active(None)   # nothing connected: mark unrecognised
+            write_gate.bind(None)
             time.sleep(1.0)
             continue
 
@@ -320,11 +326,15 @@ def read_controller():
         state['firmware'] = (firmware_version(sel['nodes'][0]) if sel['nodes'] else None) or (
             f'{_bcd >> 8:x}.{_bcd & 0xff:02x}' if _bcd else None)   # no sysfs (macOS)
         state['wired'] = _is_wired(prof, sel['pid'], _bcd)   # wired / dongle hint
+        # The exact identity writes are approved against (write_gate.py).
+        write_gate.bind(write_gate.make_identity(
+            VENDOR_VID, sel['pid'], sel.get('product'), _bcd, prof.short if prof else None))
 
         # These configure over raw USB located through sysfs (usb_transport),
-        # which macOS doesn't have, so they can't be opened that way there yet.
+        # which macOS and Windows don't have, so they can't be opened that way
+        # there yet.
         if (prof in (profiles.G7_PRO, profiles.KALEID, profiles.G7_SE)
-                and not sys.platform.startswith('linux')):
+                and not hostos.RAW_USB_CONFIG):
             state['connected'] = True
             state['mode_ok'] = False
             state['config_status'] = (f'Configuring the {prof.short} is Linux-only for now '

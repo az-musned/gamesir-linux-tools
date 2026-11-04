@@ -19,6 +19,29 @@ pyhidapi is, a thin adapter gives it the cython-hidapi shape. pyhidapi loads the
 system ``libhidapi-hidraw`` first, so it gets the hidraw backend the app needs.
 """
 import gc as _gc
+import sys as _sys
+
+_WINDOWS = _sys.platform == 'win32'
+
+
+def _output_len(path):
+    """Windows only: the collection's OutputReportByteLength (see winhid), so a
+    fixed 64-byte frame can be fitted to it; None elsewhere or when unknown."""
+    if not _WINDOWS:
+        return None
+    try:
+        import winhid
+        c = winhid.caps(path)
+        return c['output_len'] if c else None
+    except Exception:
+        return None
+
+
+def _fit(buff, out_len):
+    if not out_len:
+        return buff
+    import winhid
+    return list(winhid.fit_output(buff, out_len))
 
 try:
     # cython-hidapi built with BOTH backends (some distro packages) installs the
@@ -42,6 +65,7 @@ if hasattr(_hid, 'device'):
         # dongle on macOS): rawhid opens it over libusb and every call below
         # goes there instead.
         _raw = None
+        _out_len = None
 
         def open_path(self, path):
             if (path.decode() if isinstance(path, bytes) else path).startswith('usb:'):
@@ -51,6 +75,7 @@ if hasattr(_hid, 'device'):
                 self._raw = raw
                 return
             super().open_path(path)
+            self._out_len = _output_len(path)
             for ref in _gc.get_referents(self):
                 if hasattr(ref, 'atexit'):
                     ref.atexit = False
@@ -63,7 +88,7 @@ if hasattr(_hid, 'device'):
         def write(self, buff):
             if self._raw is not None:
                 return self._raw.write(buff)
-            return super().write(buff)
+            return super().write(_fit(buff, self._out_len))
 
         def set_nonblocking(self, v):
             if self._raw is not None:
@@ -105,6 +130,7 @@ else:
         def __init__(self):
             self._d = None
             self._nonblocking = False
+            self._out_len = None
 
         def _opened(self, **kw):
             try:
@@ -118,6 +144,7 @@ else:
             if isinstance(path, str):
                 path = path.encode()
             self._opened(path=path)
+            self._out_len = _output_len(path)
 
         def open(self, vendor_id=0, product_id=0, serial_number=None):
             self._opened(vid=vendor_id, pid=product_id, serial=serial_number)
@@ -140,7 +167,7 @@ else:
 
         def write(self, buff):
             try:
-                return self._d.write(bytes(bytearray(buff)))
+                return self._d.write(bytes(bytearray(_fit(buff, self._out_len))))
             except _hid.HIDException as e:
                 raise OSError(str(e) or 'write error') from e
 

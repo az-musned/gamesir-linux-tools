@@ -718,6 +718,95 @@ Window {
             }
         }
 
+        // ------------------------------------------- write-approval banner
+        // Windows: configuration writes stay locked per controller identity
+        // until its owner approves, which first backs up every profile
+        // (write_gate.py). Reading and live input work regardless.
+        Rectangle {
+            id: gateBanner
+            property string result: ""
+            property bool resultOk: false
+            visible: win.activeDevice === "controller" && !bridge.demoMode
+                     && (bridge.writeApproval === "locked" || bridge.writeApproval === "backing-up"
+                         || result.length > 0)
+            Layout.fillWidth: true
+            Layout.leftMargin: 20; Layout.rightMargin: 20; Layout.topMargin: 10
+            implicitHeight: gateCol.implicitHeight + 20
+            radius: Theme.radius
+            color: Theme.card
+            border.color: bridge.writeApproval === "approved" ? Theme.ok : Theme.warn
+            border.width: 1
+            Connections {
+                target: bridge
+                function onBackupStatus(ok, msg) {
+                    if (gateBanner.pending) { gateBanner.pending = false
+                        gateBanner.result = msg; gateBanner.resultOk = ok }
+                }
+            }
+            property bool pending: false
+            Column {
+                id: gateCol
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.top: parent.top; anchors.margins: 10
+                anchors.leftMargin: 14; anchors.rightMargin: 14
+                spacing: 6
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    color: bridge.writeApproval === "approved" ? Theme.text : Theme.warn
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontM; font.weight: Font.DemiBold
+                    text: bridge.writeApproval === "backing-up"
+                          ? "Backing up every profile before enabling writes…"
+                          : bridge.writeApproval === "approved"
+                          ? (gateBanner.resultOk ? "✓ Configuration writes enabled" : "Configuration writes")
+                          : "Configuration writes are locked for this controller"
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    color: Theme.textDim; font.family: Theme.fontFamily; font.pixelSize: Theme.fontS
+                    visible: bridge.writeApproval === "locked"
+                    text: "Live input and reading settings work. Before Deadband changes anything "
+                          + "on this controller, confirm it is the one below. Approving first "
+                          + "backs up all profiles (the pad briefly switches through them and "
+                          + "returns), then unlocks writes for this exact controller and firmware. "
+                          + "Close GameSir Connect first."
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WrapAnywhere
+                    visible: bridge.writeIdentity.length > 0 && bridge.writeApproval !== "approved"
+                    color: Theme.text; font.family: "monospace"; font.pixelSize: Theme.fontS
+                    text: bridge.writeIdentity
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    visible: gateBanner.result.length > 0
+                    color: gateBanner.resultOk ? Theme.textDim : Theme.warn
+                    font.family: Theme.fontFamily; font.pixelSize: Theme.fontS
+                    text: gateBanner.result
+                }
+                Row {
+                    spacing: 8
+                    ConfirmButton {
+                        visible: bridge.writeApproval === "locked"
+                        label: "Back up & enable writes…"
+                        confirmLabel: "Yes, this is my controller"
+                        onConfirmed: { gateBanner.result = ""; gateBanner.pending = true
+                                       bridge.approveWrites() }
+                    }
+                    PillButton {
+                        visible: bridge.writeApproval === "approved" && gateBanner.result.length > 0
+                        label: "Dismiss"
+                        onClicked: gateBanner.result = ""
+                    }
+                    PillButton {
+                        visible: bridge.writeApproval !== "backing-up"
+                        label: "Diagnostics…"
+                        onClicked: { diagWin.show(); diagWin.raise(); bridge.runDiagnostics() }
+                    }
+                }
+            }
+        }
+
         // --------------------------------------------------------- content
         Item {
             Layout.fillWidth: true

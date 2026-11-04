@@ -33,7 +33,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 
 def _xdg_backup_dir():
-    base = os.environ.get('XDG_DATA_HOME') or os.path.expanduser('~/.local/share')
+    try:
+        import hostos               # repo root on sys.path (the app, the tests)
+        base = hostos.user_data_dir()
+    except ImportError:             # run as a script from this directory
+        base = os.environ.get('XDG_DATA_HOME') or os.path.expanduser('~/.local/share')
     return os.path.join(base, 'deadband', 'mouse-backups')
 
 

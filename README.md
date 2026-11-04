@@ -261,6 +261,18 @@ Afterwards **Deadband** is in your app launcher (or run `deadband`). To remove
 it, run `./uninstall.sh`. Upgrading from the old `gamesir-cyclone2` install?
 `install.sh` cleans it up, and your settings carry over on first run.
 
+### Windows (early)
+
+Deadband runs on Windows 10/11 as a standalone build (no Python needed) or from
+source, through Windows' own HID driver: no driver install, no Zadig. The
+Tarantula Pro 8K / T3CE (`3537:103d`) gets live input, profiles, remaps,
+macros, sticks, triggers, gyro, poll rate and backup/restore. Windows support
+is new and not yet confirmed on hardware by the project, so configuration
+writes start **locked per controller**: the app shows the exact identity it
+found, and unlocks writes only after you approve and it has backed up every
+profile. Setup, the read-only checks to run first, and the build steps are in
+**[docs/windows.md](docs/windows.md)**.
+
 ### macOS (early)
 
 Deadband now runs on macOS too, from source for the moment. It's been tested

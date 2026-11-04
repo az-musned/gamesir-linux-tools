@@ -606,6 +606,20 @@ vendors/gamesir/
     models/g7_8k/     led                        — bank-0x20 home ring
 ```
 
+**Platforms.** What differs per operating system is answered in one module,
+`hostos.py`, as capabilities rather than OS names (`HAS_EVDEV`, `HAS_SYSFS`,
+`RAW_USB_CONFIG`, `RAW_USB_HID_FALLBACK`, `PER_COLLECTION_HID_PATHS`,
+`REQUIRES_WRITE_APPROVAL`, plus the data/config directories). Windows specifics
+sit in `winhid.py`. Windows exposes one device path per top-level HID collection,
+so discovery offers only the vendor-page collection (the family channel: out
+`0x0F`, in `0x10`/`0x12`) and groups collections into units by device-instance
+id. Writes are fitted to the collection's `OutputReportByteLength`, which
+Windows enforces exactly. `write_gate.py` keeps configuration writes locked per
+controller identity until the owner approves, after a full backup; it's on by
+default on Windows only, and it sits in `control.send_cmd`, the single choke
+point for every write. `tools/sim_tarantula.py` simulates a Tarantula in that
+Windows shape for an end-to-end self-test.
+
 Only what genuinely differs per model gets a `models/` entry — in practice that's
 lighting and captured factory images; addresses and capabilities are profile data.
 

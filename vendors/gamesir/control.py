@@ -17,6 +17,7 @@ import time
 
 from gs_common import pad
 import controller_profile as profiles
+import write_gate
 from vendors.gamesir.models.g7pro import protocol as g7pro
 from vendors.gamesir.models.kaleid import protocol as kaleid
 from vendors.gamesir.models.g7se import protocol as g7se
@@ -82,6 +83,10 @@ def send_cmd(*payload, gen=None, probe=False, padded=True):
         if _device is None:
             return False
         if not probe and not profiles.is_recognized():
+            return False
+        # Per-identity approval (write_gate.py): on platforms where it's required
+        # (Windows), nothing state-changing reaches an unapproved controller.
+        if not probe and not write_gate.allows(payload):
             return False
         if gen is not None and gen != _generation:
             return False

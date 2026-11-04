@@ -1,0 +1,29 @@
+name: Windows build
+
+# Builds the standalone Windows version and runs the test suite on a Windows
+# runner. The zip is kept as a workflow artifact.
+on:
+  workflow_dispatch:
+  push:
+    paths: ['**.py', 'qml/**', 'assets/**', 'packaging/windows/**', '.github/workflows/windows.yml']
+  pull_request:
+    paths: ['**.py', 'qml/**', 'assets/**', 'packaging/windows/**', '.github/workflows/windows.yml']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build (tests run first)
+        shell: pwsh
+        run: ./packaging/windows/build.ps1 -Zip
+      - name: Simulated-controller end-to-end check
+        shell: pwsh
+        run: .venv-build\Scripts\python tools\sim_tarantula.py --selftest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Deadband-windows-x64
+          path: dist/Deadband-windows-x64.zip

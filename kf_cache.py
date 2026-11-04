@@ -17,7 +17,9 @@ Shape:  { "0": {"count": 3, "frames": [[[r,g,b],[r,g,b],[r,g,b],[r,g,b]], ...]},
 import json
 import os
 
-CACHE_PATH = os.path.expanduser('~/.config/gamesir/keyframes.json')
+import hostos
+
+CACHE_PATH = os.path.join(hostos.user_config_dir(), 'gamesir', 'keyframes.json')
 
 
 def _load_all():

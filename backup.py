@@ -28,6 +28,7 @@ the older schema 1-3 formats used by the hidraw controllers.
 
 import json
 import os
+import hostos
 import threading
 import time
 from datetime import datetime
@@ -852,7 +853,7 @@ def _apply_se_backup(data, on_progress=None, on_done=None):
                 time.sleep(0.03)
                 return ok
 
-            base = os.environ.get('XDG_DATA_HOME') or os.path.expanduser('~/.local/share')
+            base = hostos.user_data_dir()
             ok, message = register_transaction.apply(
                 changes, read, write, os.path.join(base, 'deadband', 'controller-backups'),
                 prof.name)

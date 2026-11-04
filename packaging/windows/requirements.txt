@@ -1,0 +1,7 @@
+# Windows runtime dependencies for Deadband (see docs/windows.md).
+# hidapi: cython-hidapi; its Windows wheel uses the native Windows HID API, so
+#         no driver, libusb or Zadig is involved.
+# PySide6: Qt 6 for Python. The full package (not -Essentials) is needed for
+#          QtMultimedia, which the optional video background uses.
+hidapi>=0.14
+PySide6>=6.6

@@ -22,7 +22,9 @@ def build_id():
         return __version__
     try:
         out = subprocess.run(['git', '-C', here, 'describe', '--always', '--dirty'],
-                             capture_output=True, text=True, timeout=2)
+                             capture_output=True, text=True, timeout=2,
+                             # no console flash from the windowed Windows build
+                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         rev = out.stdout.strip()
         return f'{__version__} ({rev})' if out.returncode == 0 and rev else __version__
     except Exception:

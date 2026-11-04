@@ -8,6 +8,12 @@ curated, user-facing summary; the complete history is in git. Format loosely fol
 ## [Unreleased]
 
 ### Added
+- **Macro trigger mode and loop** on the Macros tab: **Single press** (a press
+  plays it, the next press stops it, so presses never overlap) or **Hold to
+  activate**, plus **Loop** with a pause between runs. These are the settings
+  GameSir Connect has. Flags and geometry are from Pedro Segato's extraction of
+  GameSir Connect's codec, verified on a Cyclone 2; not yet confirmed on the
+  Tarantula or 8K. Backups now include the loop interval.
 - **G7 Pro Wuchang wireless configuration** on its `3537:10a8` receiver (#17).
 - A **Swap** setting on the Lights page for Cyclone 2 units whose Home and
   Profile lights are wired the other way round (#48).
@@ -54,6 +60,13 @@ curated, user-facing summary; the complete history is in git. Format loosely fol
   controllers instead of its orange product colours.
 
 ### Fixed
+- **Macro writes no longer touch the next button's turbo.** A paddle block ends
+  two bytes earlier than Deadband assumed (its last step has no delay), so a
+  full-length write of the zero-filled step region overran into the next block's
+  turbo on/rate: on the Cyclone 2 (30 steps) and the Tarantula (32), including
+  the LT block after the last paddle. Writes now end exactly at the block end.
+- Switching a macro on or off no longer clears its trigger mode and loop bits
+  (it used to write a bare `01`/`00` over the flags byte).
 - Scrolling with a high-resolution mouse wheel, such as the G502 X's, crawled
   along at a few pixels per notch. Every scrolling page now moves at a normal
   desktop pace, and touchpads still follow your fingers.

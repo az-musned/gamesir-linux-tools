@@ -3,6 +3,15 @@
 Deadband is MIT-licensed (see [LICENSE](../LICENSE)). It includes the following
 third-party asset, used under its own terms:
 
+## GameSir macro flags and block layout
+
+The macro trigger mode (single press / hold), loop flag, loop interval and the
+paddle-block geometry (the two turbo bytes before each block, and the final step
+slot that has no delay) come from **Pedro Segato's
+[gamesir-reverse-engineering](https://github.com/pedrosegato/gamesir-reverse-engineering)**
+(MIT). That project extracted them from GameSir Connect 1.16.7 and verified them on
+a Cyclone 2. Deadband reimplements the findings; no code from it is included.
+
 ## G502 X mouse diagram silhouette
 
 The top-down G502 X outline in [`qml/App/MouseView.qml`](../qml/App/MouseView.qml)

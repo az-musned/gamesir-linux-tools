@@ -146,7 +146,7 @@ Connect v1.16.7 (kept privately with the other raw captures):
 | Poll rate | `0x002e`, codes 0–5 = 250 / 500 / 1000 / 2000 / 4000 / 8000 Hz — **the pad re-enumerates on change** |
 | Standard remaps | the Cyclone's slots (A `0x007a`), `[enable, target]` |
 | Programmable-button blocks | L4 `0x00b2`, R4 `0x015b`, C1 `0x0204`, C2 `0x02ad`, C3 `0x0356`, C4 `0x03ff`, T1 `0x04a8`, T2 `0x0551`, T3 `0x05fa` |
-| Block layout | +0 remap enable · +1…+4 target(s) ("multiple" fills +2 onward) · +5 macro enable · +6/+7 unknown 16-bit · +8 step count · +9… steps `[target, hold BE16, delay BE16]` × 32 |
+| Block layout | −2 turbo on · −1 turbo rate (Hz) · +0 remap enable · +1…+3 target(s) · +4 toggle · +5 **flags** (bit 0 macro on, bit 1 hold to activate, bit 2 loop) · +6/+7 loop interval ms (BE16) · +8 step count · +9… steps `[target, hold BE16, delay BE16]` × 31, then a last `[target, hold]`, ending at +0xa6 (see *Macro flags and block geometry*) |
 | Sticks / triggers / motion | the 8K's blocks + `0x34d` (LS deadzone `0x06e4`, motion activation `0x0729`) |
 | Lighting (global, bank `0x20`) | mode `0x0000`; logo hue/sat/brightness around `0x0011`–`0x0012` — partly mapped |
 
@@ -449,7 +449,44 @@ arrive. A descriptor fixup (HID-BPF) should fix the Cyclone; untried.
 
 Paddle macros on the 8K: the firmware plays past the stored step count until an
 empty step, and each paddle block's last byte (`+0xa8`, `0x0a` on every paddle)
-is a setting rather than step 32 (#51).
+is a setting rather than step 32 (#51). (It is the next block's turbo rate, 10 Hz:
+see below.)
+
+### Macro flags and block geometry (2026-11-04)
+
+From Pedro Segato's extraction of GameSir Connect 1.16.7's profile codec
+([gamesir-reverse-engineering](https://github.com/pedrosegato/gamesir-reverse-engineering),
+`docs/protocolo.md`), verified there on a Cyclone 2. Their offsets are this
+project's +2. Every paddle block (and every 7-byte button block) starts with
+**turbo on, turbo rate**, two bytes *before* the address Deadband calls the base:
+
+| Offset (Deadband) | Field |
+|---|---|
+| −2, −1 | turbo on, turbo rate in Hz |
+| +0, +1…+3, +4 | remap on, up to three targets, toggle |
+| +5 | flags: bit 0 macro on · bit 1 hold to activate (clear = single press) · bit 2 loop |
+| +6/+7 | loop interval, ms, BE16: the pause after the last step before repeating |
+| +8 | step count |
+| +9… | steps `[target, hold BE16, delay BE16]`; the block's final slot is `[target, hold]` |
+
+It matches everything found here independently (remap on +0, macro on +5, count
++8, steps +9, and the 8K's `0x0a` at +0xa8 = the *next* block's turbo rate). It
+also shows that 5-byte steps all the way to the block end overrun it by two bytes.
+A Cyclone block is 159 bytes (29 full steps + a short 30th), and an 8K or
+Tarantula block 169 (31 + a short 32nd). Writing 30 or 32 full steps zeroed the
+next block's turbo on/rate: the next paddle's, or after the last paddle the LT
+block's. `macro.block_bytes` now ends each write exactly at the block's end.
+
+Firmware behaviour, as measured there: **single press** plays the sequence once
+per press, and a press during playback stops it (no overlap), so with loop it
+repeats until the next press. **Hold** plays while held and stops on release;
+with loop it repeats while held. The D-pad and face buttons have 7-byte blocks
+(turbo, remap, toggle) and no macro region, so no firmware here stores a D-pad
+macro.
+
+**Not yet confirmed on the Tarantula or 8K:** the app's per-model packet code
+produces identical bytes across the family, and the block lengths fit exactly,
+but this project hasn't written the flags on those pads yet.
 
 ---
 

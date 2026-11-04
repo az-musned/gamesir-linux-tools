@@ -82,6 +82,25 @@ Choose **Apply** to persist the batch to the controller. (Macros are the one
 exception: they're saved to the controller as you edit them.) Take a **backup** first if
 you're experimenting (see below).
 
+### Macros (controller)
+
+Pick a programmable button, switch **Macro** on, and build the sequence; each
+step is a button or key with its own **hold** and **delay**. Two settings decide
+how it plays (the same ones GameSir Connect offers):
+
+- **Trigger → Single press**: one press plays the whole sequence, and pressing
+  again stops it, so a second press never starts an overlapping copy. **Hold to
+  activate**: it plays while the button is held and stops as soon as you let go.
+- **Loop**: repeats the sequence (until the next press, or while held), with a
+  **pause** in ms between runs.
+
+The behaviour comes from GameSir's firmware, as decoded from GameSir Connect and
+verified on a Cyclone 2. On the Tarantula and G7 Pro 8K it uses the same encoding
+but hasn't been confirmed on those pads yet. The D-pad can't hold a macro (no
+GameSir firmware stores one there); only the programmable buttons can. On a full
+32-step macro (30 on the Cyclone) the last step has no delay, because the
+controller stores only its hold.
+
 ### Button remap
 
 Remap any input to another: pick a source button and a target, or clear a remap to

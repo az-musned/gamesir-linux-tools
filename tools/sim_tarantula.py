@@ -32,6 +32,7 @@ PID, BCD = 0x103D, 0x0249
 PRODUCT = 'Tarantula 8K PC (simulated)'
 VENDOR_PATH = f'\\\\?\\HID#VID_3537&PID_103D&MI_01&Col04#9&51ab&0&0003#{GUID}'
 OUTPUT_LEN = 64
+LOG_WRITES = False            # the GUI mode prints every register write it receives
 
 
 class Pad:
@@ -82,6 +83,9 @@ class Pad:
                     self.replies.append([0x10, 0x05, bank, f[3], f[4], ln] + data)
             elif op == 0x03:
                 bank, addr, ln = f[2], (f[3] << 8) | f[4], f[5]
+                if LOG_WRITES:
+                    print(f'[sim] write bank {bank} @0x{addr:04x}: '
+                          + ' '.join(f'{x:02x}' for x in f[6:6 + ln]), flush=True)
                 if bank in self.banks and self.bank_open(bank):
                     self.banks[bank][addr:addr + ln] = bytes(f[6:6 + ln])
 
@@ -288,6 +292,8 @@ def selftest():
 
 
 def gui():
+    global LOG_WRITES
+    LOG_WRITES = True
     install()
     sys.argv = [sys.argv[0]] + [a for a in sys.argv[1:] if a != '--gui']
     import runpy

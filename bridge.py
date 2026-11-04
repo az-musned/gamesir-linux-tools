@@ -700,8 +700,9 @@ class GamesirBridge(QObject):
         if bank is None:
             return
         mx = self._prof.macro_max
+        region = macro.region_for(self._prof)
         reads = [(bank, a, ln) for _n, base in self._prof.MACRO_SLOTS
-                 for a, ln in macro.read_addrs(base, mx)]
+                 for a, ln in macro.read_addrs(base, mx, region)]
         if prof != self._macro_profile and not self._macro_loading and self._bank_ready(prof):
             control.request_regs(reads)
             self._macro_loading = True
@@ -712,7 +713,7 @@ class GamesirBridge(QObject):
         if any(v is None for v in vals.values()):
             return
         self._macro_loading = False
-        self._macros = {name: macro.decode(vals, base, mx)
+        self._macros = {name: macro.decode(vals, base, mx, region)
                         for name, base in self._prof.MACRO_SLOTS}
         self.macroLoaded.emit()
 
@@ -2166,10 +2167,35 @@ class GamesirBridge(QObject):
     def macroMax(self):
         return self._prof.macro_max
 
+    @Property(bool, notify=controllerChanged)
+    def macroShortLast(self):
+        """The paddle block's final step slot holds [target, hold] only, so the
+        last step at full length has no delay (see macro.block_bytes)."""
+        if not self._prof.has_macros:
+            return False
+        sizes = macro.slot_sizes(macro.region_for(self._prof), self._prof.macro_max)
+        return bool(sizes) and sizes[-1] == macro.SHORT_LEN
+
     @Property('QVariantMap', notify=macroLoaded)
     def macros(self):
-        """Paddle name -> {enable: bool, events: [{target, hold, delay}]}."""
+        """Paddle name -> {enable, hold, loop, loop_ms, flags,
+        events: [{target, hold, delay}]} (see vendors/gamesir/macro.py)."""
         return self._macros
+
+    def _macro_state(self, paddle):
+        return self._macros.setdefault(paddle, {'enable': False, 'hold': False, 'loop': False,
+                                                'loop_ms': 0, 'flags': 0, 'events': []})
+
+    def _write_macro_head(self, paddle, base, **bits):
+        """Change some flag bits (and/or the loop interval) of one paddle,
+        keeping every other bit: one 3-byte write at base+FLAGS_OFF, verified."""
+        m = self._macro_state(paddle)
+        loop_ms = bits.pop('loop_ms', m.get('loop_ms', 0))
+        flags = macro.flags_byte(m.get('flags', 0), **bits)
+        m.update(flags=flags, enable=bool(flags & macro.FLAG_ENABLED),
+                 hold=bool(flags & macro.FLAG_HOLD), loop=bool(flags & macro.FLAG_LOOP),
+                 loop_ms=max(0, min(0xffff, int(loop_ms))))
+        self._write_macro(base + macro.FLAGS_OFF, macro.head_bytes(flags, m['loop_ms']))
 
     def _macro_base(self, paddle):
         for name, base in self._prof.MACRO_SLOTS:
@@ -2182,8 +2208,26 @@ class GamesirBridge(QObject):
         base = self._macro_base(paddle)
         if base is None or self._writes_locked():
             return
-        self._macros.setdefault(paddle, {'enable': False, 'events': []})['enable'] = bool(on)
-        self._write_macro(base + macro.ENABLE_OFF, [1 if on else 0])
+        # only bit 0: writing a bare 1/0 here used to wipe the trigger-mode and
+        # loop bits GameSir Connect (or this page) had set
+        self._write_macro_head(paddle, base, enable=bool(on))
+
+    @Slot(str, bool)
+    def setMacroHold(self, paddle, hold):
+        """Trigger mode: False = Single Press (a press plays it, the next press
+        stops it), True = hold to activate (plays while held)."""
+        base = self._macro_base(paddle)
+        if base is None or self._writes_locked():
+            return
+        self._write_macro_head(paddle, base, hold=bool(hold))
+
+    @Slot(str, bool, int)
+    def setMacroLoop(self, paddle, loop, interval_ms):
+        """Loop on/off, and the pause (ms) after the last step before it repeats."""
+        base = self._macro_base(paddle)
+        if base is None or self._writes_locked():
+            return
+        self._write_macro_head(paddle, base, loop=bool(loop), loop_ms=int(interval_ms))
 
     @Slot(str, 'QVariantList')
     def setMacroEvents(self, paddle, events):
@@ -2194,8 +2238,9 @@ class GamesirBridge(QObject):
         mx = self._prof.macro_max
         evs = [{'target': int(e['target']), 'hold': int(e['hold']), 'delay': int(e['delay'])}
                for e in events][:mx]
-        self._macros.setdefault(paddle, {'enable': False, 'events': []})['events'] = evs
-        self._write_macro(base + macro.COUNT_OFF, macro.block_bytes(evs, mx))
+        self._macro_state(paddle)['events'] = evs
+        self._write_macro(base + macro.COUNT_OFF,
+                          macro.block_bytes(evs, mx, macro.region_for(self._prof)))
 
     @Slot('QVariantList')
     def applyKeyframes(self, frames):

@@ -13,6 +13,9 @@ Item {
     property int pad: 0
     readonly property string paddle: bridge.macroSlots.length > pad ? bridge.macroSlots[pad] : ""
     property bool enable: false
+    property bool hold: false          // trigger mode: false = single press, true = hold
+    property bool loop: false
+    property int loopMs: 0
     property var events: []            // [{target, hold, delay}]
     property int sel: -1               // selected event index, -1 = none
     property var clip: null            // copied step (in-app clipboard)
@@ -24,6 +27,10 @@ Item {
     function seed() {
         var m = bridge.macros[paddle]
         enable = m ? m.enable === true : false
+        hold = m ? m.hold === true : false
+        loop = m ? m.loop === true : false
+        loopMs = m && m.loop_ms ? m.loop_ms : 0
+        loopSw.checked = loop
         events = m && m.events ? m.events.map(function (e) {
             return {target: e.target, hold: e.hold, delay: e.delay}
         }) : []
@@ -153,6 +160,61 @@ Item {
                     onToggled: { page.enable = macroSw.checked
                                  bridge.setMacroEnable(page.paddle, macroSw.checked) }
                 }
+            }
+
+            // ---- trigger mode + loop (the paddle block's flags byte) ----
+            RowLayout {
+                width: parent.width; spacing: 10
+                enabled: page.enable
+                opacity: page.enable ? 1.0 : 0.45
+                Text { text: "Trigger"; color: Theme.textDim
+                       font.family: Theme.fontFamily; font.pixelSize: Theme.fontS
+                       Layout.alignment: Qt.AlignVCenter }
+                PillButton {
+                    label: "Single press"; highlight: !page.hold
+                    onClicked: if (page.hold) { page.hold = false
+                                                bridge.setMacroHold(page.paddle, false) }
+                }
+                PillButton {
+                    label: "Hold to activate"; highlight: page.hold
+                    onClicked: if (!page.hold) { page.hold = true
+                                                 bridge.setMacroHold(page.paddle, true) }
+                }
+                Item { Layout.fillWidth: true }
+                Text { text: "Loop"; color: Theme.textDim
+                       font.family: Theme.fontFamily; font.pixelSize: Theme.fontS
+                       Layout.alignment: Qt.AlignVCenter }
+                ToggleSwitch {
+                    id: loopSw
+                    onToggled: { page.loop = loopSw.checked
+                                 bridge.setMacroLoop(page.paddle, page.loop, page.loopMs) }
+                }
+                Text { text: "pause"; color: Theme.textDim; visible: page.loop
+                       font.family: Theme.fontFamily; font.pixelSize: Theme.fontS
+                       Layout.alignment: Qt.AlignVCenter }
+                NumField {
+                    visible: page.loop
+                    Layout.alignment: Qt.AlignVCenter
+                    width: 64; value: page.loopMs; maxVal: 65535
+                    onCommitted: function (v) { page.loopMs = v
+                                                bridge.setMacroLoop(page.paddle, page.loop, v) }
+                }
+                Text { text: "ms"; color: Theme.textDim; visible: page.loop
+                       font.family: Theme.fontFamily; font.pixelSize: Theme.fontS
+                       Layout.alignment: Qt.AlignVCenter }
+            }
+            Text {
+                width: parent.width; wrapMode: Text.WordWrap
+                visible: page.enable
+                color: Theme.textDim
+                font.family: Theme.fontFamily; font.pixelSize: Theme.fontS
+                text: (page.hold
+                       ? "Hold to activate: plays while the button is held and stops the moment you let go."
+                       : "Single press: one press plays the whole sequence; pressing again stops it, so presses never overlap.")
+                      + (page.loop ? (page.hold ? " Loop: repeats while held" : " Loop: repeats until the next press")
+                                     + ", pausing " + page.loopMs + " ms between runs." : "")
+                      + (bridge.macroShortLast && page.events.length >= bridge.macroMax
+                         ? " The last step has no delay: the controller stores only its hold." : "")
             }
 
             // Every other config tab stages edits until Save to Profile. Macros

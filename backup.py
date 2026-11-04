@@ -104,7 +104,8 @@ def _profile_fields():
     if prof.has_macros:
         for pname, base in prof.MACRO_SLOTS:
             out += [(addr, ln, f'Macro {pname} 0x{addr:04x}')
-                    for addr, ln in macro.read_addrs(base, prof.macro_max)]
+                    for addr, ln in macro.read_addrs(base, prof.macro_max,
+                                                     macro.region_for(prof))]
     return out
 
 

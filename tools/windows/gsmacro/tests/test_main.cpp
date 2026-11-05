@@ -1,8 +1,19 @@
 #include <cstring>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <mmsystem.h>
+#endif
 
 #include "test.h"
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // The engine tests run on the real clock with PortableWaiter and short
+    // sleeps; at Windows' default ~15.6 ms tick those overshoot by ~10 ms.
+    timeBeginPeriod(1);
+#endif
     const char* filter = argc > 1 ? argv[1] : nullptr;
     int run = 0, failedCases = 0;
     for (auto& c : t::registry()) {

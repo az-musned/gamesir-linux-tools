@@ -75,9 +75,9 @@ bool getState(int slot, uint32_t* packet, GamepadState* out) {
     return true;
 }
 
-bool setVibration(int slot, uint16_t large, uint16_t small) {
+bool setVibration(int slot, uint16_t large, uint16_t smallMotor) {
     if (!load(nullptr) || !g_setState || slot < 0 || slot > 3) return false;
-    XVibration v{large, small};
+    XVibration v{large, smallMotor};
     return g_setState((DWORD)slot, &v) == ERROR_SUCCESS;
 }
 

@@ -25,7 +25,7 @@ public:
     bool open(std::string* err) override;
     void close() override;
     void read(InputSample* out) override;
-    void setRumble(uint8_t large, uint8_t small) override;
+    void setRumble(uint8_t large, uint8_t smallMotor) override;
     int slot() const { return slot_.load(); }
 
 private:

@@ -31,6 +31,8 @@
 #include "../core/edge_timeline.h"
 #include "../core/engine.h"
 #ifdef _WIN32
+#include <windows.h>
+#include <mmsystem.h>  // timeBeginPeriod
 #include "../backends/win/vigem_sink.h"
 #include "../backends/win/win_waiter.h"
 #include "../backends/win/xinput_source.h"
@@ -479,6 +481,13 @@ int main(int argc, char** argv) {
     }
     if (a.has("--out")) g_out = std::fopen(a.str("--out").c_str(), "w");
     say("gsm_bench (%s), %u hardware threads\n", mode.c_str(), std::thread::hardware_concurrency());
+#ifdef _WIN32
+    // The engine waits on a high-resolution waitable timer and is unaffected,
+    // but the harness's own sleeps (input pacing, activation spacing) would
+    // otherwise round up to the ~15.6 ms default tick.
+    timeBeginPeriod(1);
+    say("   harness timer resolution: 1 ms (timeBeginPeriod; engine uses its own high-resolution timer)\n");
+#endif
     int rc = 1;
     if (mode == "mock") rc = runMock(a);
 #ifdef _WIN32

@@ -30,7 +30,7 @@ struct XUSB_REPORT {
     SHORT sThumbLX, sThumbLY, sThumbRX, sThumbRY;
 };
 
-typedef VOID(CALLBACK* PFN_X360_NOTIFICATION)(void* client, void* target, UCHAR large, UCHAR small, UCHAR led, LPVOID user);
+typedef VOID(CALLBACK* PFN_X360_NOTIFICATION)(void* client, void* target, UCHAR large, UCHAR smallMotor, UCHAR led, LPVOID user);
 typedef void*(__cdecl* PFN_alloc)();
 typedef VIGEM_ERROR(__cdecl* PFN_connect)(void*);
 typedef void(__cdecl* PFN_disconnect)(void*);
@@ -87,8 +87,8 @@ bool loadApi(std::string* err) {
     return true;
 }
 
-VOID CALLBACK onNotification(void*, void*, UCHAR large, UCHAR small, UCHAR, LPVOID user) {
-    static_cast<ViGEmSink*>(user)->onRumble(large, small);
+VOID CALLBACK onNotification(void*, void*, UCHAR large, UCHAR smallMotor, UCHAR, LPVOID user) {
+    static_cast<ViGEmSink*>(user)->onRumble(large, smallMotor);
 }
 
 std::string errText(const char* what, VIGEM_ERROR e) {
@@ -186,9 +186,9 @@ void ViGEmSink::setRumbleHandler(std::function<void(uint8_t, uint8_t)> h) {
     rumble_ = std::move(h);
 }
 
-void ViGEmSink::onRumble(uint8_t large, uint8_t small) {
+void ViGEmSink::onRumble(uint8_t large, uint8_t smallMotor) {
     std::lock_guard<std::mutex> l(rumbleLock_);
-    if (rumble_) rumble_(large, small);
+    if (rumble_) rumble_(large, smallMotor);
 }
 
 }  // namespace gsm

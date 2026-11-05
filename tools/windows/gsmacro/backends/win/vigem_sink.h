@@ -23,7 +23,7 @@ public:
     void setRumbleHandler(std::function<void(uint8_t, uint8_t)> h) override;
 
     // Called from ViGEm's notification thread.
-    void onRumble(uint8_t large, uint8_t small);
+    void onRumble(uint8_t large, uint8_t smallMotor);
     // XInput slot Windows assigned to the virtual pad, or -1 (not yet known).
     int userIndex();
 

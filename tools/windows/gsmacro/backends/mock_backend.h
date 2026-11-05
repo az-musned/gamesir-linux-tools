@@ -24,7 +24,7 @@ public:
         std::lock_guard<std::mutex> l(m_);
         waker_ = std::move(w);
     }
-    void setRumble(uint8_t large, uint8_t small) override { rumbleL_ = large; rumbleS_ = small; }
+    void setRumble(uint8_t large, uint8_t smallMotor) override { rumbleL_ = large; rumbleS_ = smallMotor; }
 
     void set(const GamepadState& st, bool connected = true) {
         std::function<void()> w;

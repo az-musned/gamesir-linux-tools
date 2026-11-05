@@ -20,7 +20,7 @@ struct SlotInfo {
 bool load(std::string* err);
 // false if the slot is empty / unavailable.
 bool getState(int slot, uint32_t* packet, GamepadState* out);
-bool setVibration(int slot, uint16_t large, uint16_t small);
+bool setVibration(int slot, uint16_t large, uint16_t smallMotor);
 std::vector<SlotInfo> slots();
 // First slot with this VID (and PID if non-zero), or -1.
 int findSlot(uint16_t vid, uint16_t pid = 0);

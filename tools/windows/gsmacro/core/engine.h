@@ -98,7 +98,9 @@ private:
     EngineSnapshot shared_;
 
     static constexpr size_t kTimelineSize = 8192;
-    std::array<TimelineSample, kTimelineSize> ring_{};
+    // Heap-allocated once at construction (~320 KB): an inline array made a
+    // stack-allocated Engine overflow MSVC's 1 MB default stack.
+    std::vector<TimelineSample> ring_ = std::vector<TimelineSample>(kTimelineSize);
     std::atomic<size_t> ringHead_{0}, ringTail_{0};
 };
 

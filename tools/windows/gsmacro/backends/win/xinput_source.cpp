@@ -41,9 +41,9 @@ void XInputSource::read(InputSample* out) {
     out->seq = packet;
 }
 
-void XInputSource::setRumble(uint8_t large, uint8_t small) {
+void XInputSource::setRumble(uint8_t large, uint8_t smallMotor) {
     int slot = slot_.load();
-    if (slot >= 0) xi::setVibration(slot, (uint16_t)(large * 257), (uint16_t)(small * 257));
+    if (slot >= 0) xi::setVibration(slot, (uint16_t)(large * 257), (uint16_t)(smallMotor * 257));
 }
 
 }  // namespace gsm

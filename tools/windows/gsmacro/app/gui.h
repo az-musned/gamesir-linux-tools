@@ -29,6 +29,19 @@ public:
     void setTextMode(int side, bool on);
     void showSetup(bool on) { setupOpen_ = on; if (on) runChecks(); }
     void triggerMacro(int side) { engine_->triggerMacro(side); }
+    // Tutorial automation: replace a macro's steps, read back where the
+    // visual timeline drew its wait handles (screen coordinates).
+    void setMacro(int side, const std::string& name, const std::vector<Action>& actions) {
+        cfg_.macros[side].name = name;
+        cfg_.macros[side].actions = actions;
+        applyConfig();
+    }
+    void setSavePath(const std::string& p) { cfgPath_ = p; }
+    void saveNow() {
+        std::string err;
+        if (saveConfigFile(cfgPath_, cfg_, &err)) setStatus("Saved " + cfgPath_, false);
+    }
+    std::vector<std::pair<float, float>> waitHandles() const { return handlePos_; }
 
 private:
     enum class Mode { Demo, Live };
@@ -113,6 +126,7 @@ private:
     std::string errTitle_, errText_, errGuidance_;
     bool errPending_ = false;
     float scale_ = 1;
+    std::vector<std::pair<float, float>> handlePos_;  // last drawn wait handles (x, y)
 };
 
 }  // namespace gsm

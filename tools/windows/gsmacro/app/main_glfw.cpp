@@ -42,10 +42,12 @@ struct Shot {
 
 int main(int argc, char** argv) {
     std::string shotDir;
+    bool tutorial = false;
     int width = 1480, height = 940;
     float scale = 1.0f;
     for (int i = 1; i < argc; i++) {
         if (!std::strcmp(argv[i], "--screenshots") && i + 1 < argc) shotDir = argv[++i];
+        else if (!std::strcmp(argv[i], "--tutorial") && i + 1 < argc) { shotDir = argv[++i]; tutorial = true; }
         else if (!std::strcmp(argv[i], "--size") && i + 1 < argc) std::sscanf(argv[++i], "%dx%d", &width, &height);
         else if (!std::strcmp(argv[i], "--scale") && i + 1 < argc) scale = (float)std::atof(argv[++i]);
     }
@@ -69,7 +71,50 @@ int main(int argc, char** argv) {
         app.applyStyle(scale);
 
         std::vector<Shot> script;
-        if (!shotDir.empty()) {
+        if (tutorial) {
+            using gsm::Action;
+            using gsm::AX_LX;
+            using gsm::BTN_A;
+            const std::vector<Action> full = {
+                Action::setAxis(AX_LX, -1), Action::press(BTN_A), Action::wait(25), Action::release(BTN_A), Action::wait(25),
+                Action::press(BTN_A), Action::wait(25), Action::release(BTN_A), Action::wait(50), Action::releaseAxis(AX_LX),
+                Action::wait(17)};
+            auto drag = [](float dx, bool down) {
+                return [dx, down](gsm::App& a) {
+                    auto h = a.waitHandles();
+                    if (h.empty()) return;
+                    ImGuiIO& io = ImGui::GetIO();
+                    io.AddKeyEvent(ImGuiMod_Shift, true);
+                    io.AddMousePosEvent(h[0].first + dx, h[0].second);
+                    io.AddMouseButtonEvent(0, down);
+                };
+            };
+            script = {
+                {500, [](gsm::App& a) { a.selectMacroTab(0); a.setMacro(0, "My wall dash left", {}); }, nullptr},
+                {800, nullptr, "T1-empty-macro.ppm"},
+                {900, [full](gsm::App& a) { a.setMacro(0, "My wall dash left", {full[0], full[1], full[2]}); }, nullptr},
+                {1200, nullptr, "T2-first-steps.ppm"},
+                {1300, [full](gsm::App& a) { a.setMacro(0, "My wall dash left", full); }, nullptr},
+                {1600, nullptr, "T3-complete-macro.ppm"},
+                // Real mouse drag of the first wait handle (Shift held = snap to game ticks).
+                {1700, [](gsm::App& a) { auto h = a.waitHandles(); if (!h.empty()) ImGui::GetIO().AddMousePosEvent(h[0].first, h[0].second); }, nullptr},
+                {1760, drag(0, true), nullptr},
+                {1820, drag(15, true), nullptr},
+                {1880, drag(30, true), nullptr},
+                {1940, drag(45, true), nullptr},
+                {2050, nullptr, "T4-drag-wait.ppm"},
+                {2100, drag(45, false), nullptr},
+                {2150, [](gsm::App&) { ImGui::GetIO().AddKeyEvent(ImGuiMod_Shift, false); ImGui::GetIO().AddMousePosEvent(5, 5); }, nullptr},
+                {2400, [](gsm::App& a) { a.triggerMacro(0); }, nullptr},
+                {2470, nullptr, "T5-test-button.ppm"},
+                {3000, [](gsm::App& a) { a.playScenario("L1 + Square"); }, nullptr},
+                {3260, nullptr, "T6-real-chord.ppm"},
+                {4200, [](gsm::App& a) { a.setTextMode(0, true); }, nullptr},
+                {4400, nullptr, "T7-text-mode.ppm"},
+                {4500, [shotDir](gsm::App& a) { a.setTextMode(0, false); a.setSavePath(shotDir + "/gsmacro.cfg"); a.saveNow(); }, nullptr},
+                {4800, nullptr, "T8-saved.ppm"},
+            };
+        } else if (!shotDir.empty()) {
             script = {
                 {700, nullptr, "01-overview.ppm"},
                 {800, [](gsm::App& a) { a.playScenario("L1 + Square"); }, nullptr},

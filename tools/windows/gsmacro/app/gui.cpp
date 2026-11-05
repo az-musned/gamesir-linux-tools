@@ -879,7 +879,9 @@ void App::drawMacroVisual(int side) {
     // Draggable wait boundaries.
     bool changed = false;
     float handleTop = p0.y, handleH = h - 14 * scale_;
+    handlePos_.clear();
     for (size_t k = 0; k < handles.size(); k++) {
+        handlePos_.push_back({X(handles[k].second), handleTop + handleH * 0.5f});
         int ai = handles[k].first;
         float hx = X(handles[k].second);
         ImGui::PushID(ai);

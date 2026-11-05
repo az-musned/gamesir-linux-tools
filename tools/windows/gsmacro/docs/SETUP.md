@@ -72,6 +72,14 @@ a hidden pad still holds its slot. If the GameSir connected first, the
 virtual pad sits in slot 1 and games treat it as **player 2**. Start Live
 Mode **before** plugging the pad in (or unplug it, Start Live Mode, replug):
 the virtual pad then takes slot 0.
+
+Without unplugging: run `start-gsmacro-slot0.ps1` (e.g. from a shortcut with
+target `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+"C:\Tools\gsmacro\start-gsmacro-slot0.ps1"`). After one admin prompt it
+disables the pad's XInput interface, opens gsmacro, waits for you to click
+Start Live Mode, and re-enables the pad once the virtual pad has slot 0. It
+always re-enables (also on timeout or if you close its window) and logs to
+`%TEMP%\gsmacro-slot0.log`. Device state only; no drivers or settings change.
 8. **Turning it off.** Click **Demo** or **Stop Live Mode**, or close
    gsmacro: the virtual pad disappears with every input released.
 

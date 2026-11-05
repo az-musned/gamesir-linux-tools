@@ -36,8 +36,9 @@ in the top bar). Work through the steps in order:
 
 1. **Controller detected.** It must list the GameSir (VID 3537) in an XInput
    slot. Unapply reWASD first: reWASD can hide the physical pad.
-2. **ViGEmBus and ViGEmClient.dll.** Opens and closes a bus connection
-   without creating a device.
+2. **ViGEmBus and ViGEmClient.dll.** Opens a bus connection without
+   creating a device. gsmacro keeps that one connection until it exits
+   (closing it early can hang ViGEmClient), so this is normal.
 3. **Start Live Mode.** Creates one virtual Xbox 360 pad. **Macros start
    OFF** (pure passthrough).
 4. **Check passthrough.** Open `joy.cpl` and test every button, stick and

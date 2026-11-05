@@ -36,8 +36,9 @@ private:
     std::function<void(uint8_t, uint8_t)> rumble_;
 };
 
-// Read-only availability check: loads ViGEmClient.dll and opens (then closes)
-// a bus connection without creating any virtual device.
+// Read-only availability check: loads ViGEmClient.dll and opens the
+// process-wide bus connection (kept until exit, see vigem_sink.cpp) without
+// creating any virtual device.
 struct ViGEmProbe {
     bool dllLoaded = false, busConnected = false;
     std::string text;

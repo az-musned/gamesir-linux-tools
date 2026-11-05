@@ -100,25 +100,46 @@ std::string errText(const char* what, VIGEM_ERROR e) {
     return b;
 }
 
+// One bus connection per process: opened on first use, never disconnected.
+// vigem_disconnect() (v1.21.222.0) can deadlock: it calls CancelIoEx once on
+// the DS4 output pickup thread's I/O and then waits INFINITE for that thread.
+// If the thread has not issued its DeviceIoControl yet (a disconnect soon
+// after vigem_connect), nothing is cancelled and both block forever. Seen on
+// the target PC: the GUI thread hung in vigem_disconnect while the pickup
+// thread sat in GetOverlappedResult. Windows closes the handle (and cancels
+// the pending I/O) at process exit; virtual pads are still removed with
+// vigem_target_remove.
+std::mutex g_busLock;
+void* g_bus = nullptr;
+
+void* sharedBus(VIGEM_ERROR* e) {
+    std::lock_guard<std::mutex> l(g_busLock);
+    *e = VIGEM_ERROR_NONE;
+    if (g_bus) return g_bus;
+    void* c = g.alloc();
+    if (!c) return nullptr;
+    *e = g.connect(c);
+    if (*e != VIGEM_ERROR_NONE) { g.free_(c); return nullptr; }  // no pickup thread exists on failure
+    g_bus = c;
+    return c;
+}
+
 }  // namespace
 
 bool ViGEmSink::open(std::string* err) {
     close();
     userIndex_ = -1;
     if (!loadApi(err)) return false;
-    client_ = g.alloc();
-    if (!client_) { *err = "vigem_alloc failed"; return false; }
-    VIGEM_ERROR e = g.connect(client_);
-    if (e != VIGEM_ERROR_NONE) { *err = errText("vigem_connect", e); g.free_(client_); client_ = nullptr; return false; }
+    VIGEM_ERROR e = VIGEM_ERROR_NONE;
+    client_ = sharedBus(&e);
+    if (!client_) { *err = e == VIGEM_ERROR_NONE ? "vigem_alloc failed" : errText("vigem_connect", e); return false; }
     target_ = g.x360Alloc();
     e = g.add(client_, target_);
     if (e != VIGEM_ERROR_NONE) {
         *err = errText("vigem_target_add", e);
         g.targetFree(target_);
         target_ = nullptr;
-        g.disconnect(client_);
-        g.free_(client_);
-        client_ = nullptr;
+        client_ = nullptr;  // shared connection stays open
         return false;
     }
     if (g.regNotif) notifRegistered_ = g.regNotif(client_, target_, onNotification, this) == VIGEM_ERROR_NONE;
@@ -135,11 +156,7 @@ void ViGEmSink::close() {
         g.targetFree(target_);
         target_ = nullptr;
     }
-    if (client_) {
-        g.disconnect(client_);
-        g.free_(client_);
-        client_ = nullptr;
-    }
+    client_ = nullptr;  // shared bus connection: never vigem_disconnect (see sharedBus)
 }
 
 bool ViGEmSink::submit(const GamepadState& s) {
@@ -167,17 +184,15 @@ ViGEmProbe probeViGEm() {
     std::string err;
     if (!loadApi(&err)) { p.text = err; return p; }
     p.dllLoaded = true;
-    void* c = g.alloc();
-    if (!c) { p.text = "ViGEmClient.dll loaded, but vigem_alloc failed"; return p; }
-    VIGEM_ERROR e = g.connect(c);
-    if (e == VIGEM_ERROR_NONE) {
+    VIGEM_ERROR e = VIGEM_ERROR_NONE;
+    if (sharedBus(&e)) {
         p.busConnected = true;
         p.text = "ViGEmClient.dll loaded; ViGEmBus driver reachable";
-        g.disconnect(c);
+    } else if (e == VIGEM_ERROR_NONE) {
+        p.text = "ViGEmClient.dll loaded, but vigem_alloc failed";
     } else {
         p.text = "ViGEmClient.dll loaded; " + errText("connecting to ViGEmBus", e);
     }
-    g.free_(c);
     return p;
 }
 

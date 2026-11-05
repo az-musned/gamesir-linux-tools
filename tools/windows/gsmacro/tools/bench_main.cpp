@@ -444,7 +444,8 @@ int runLive(const Args& a) {
             if (k < back.size() && back[k].t <= limit) vis.add(back[k].t - frames[i].t);
             else unmatched++;
         }
-        say("  submit -> visible to XInput readers (includes up to 100 us readback sampling):\n");
+        say("  submit -> visible to XInput readers. Includes the readback's own sampling delay: 100 us target,\n"
+            "  but the OS timer may wake later (see 'readback poll timer error'); this is an upper bound:\n");
         hist("submit -> XInput readback", vis);
         say("  %zu of %zu submitted states were superseded before the readback saw them\n", unmatched, frames.size());
         hist("readback poll timer error", pollErr);

@@ -1,5 +1,7 @@
 #include "vigem_sink.h"
 
+#include "xinput_util.h"
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -133,6 +135,13 @@ bool ViGEmSink::open(std::string* err) {
     VIGEM_ERROR e = VIGEM_ERROR_NONE;
     client_ = sharedBus(&e);
     if (!client_) { *err = e == VIGEM_ERROR_NONE ? "vigem_alloc failed" : errText("vigem_connect", e); return false; }
+    // Remember which XInput slots already hold an Xbox 360 identity (another
+    // remapper, a real 360 pad) so userIndex() can tell ours apart.
+    preexistingX360_ = 0;
+    std::string xerr;
+    if (xi::load(&xerr))
+        for (auto& s : xi::slots())
+            if (s.connected && s.vid == 0x045E && s.pid == 0x028E) preexistingX360_ |= 1u << s.slot;
     target_ = g.x360Alloc();
     e = g.add(client_, target_);
     if (e != VIGEM_ERROR_NONE) {
@@ -172,10 +181,17 @@ bool ViGEmSink::submit(const GamepadState& s) {
     return g.update(client_, target_, r) == VIGEM_ERROR_NONE;
 }
 
+// The XInput slot is found by looking for the X360 slot that appeared when our
+// pad was plugged in. vigem_target_x360_get_user_index is NOT used: on the
+// target PC (ViGEmBus 1.21.442) it returned success with index 0 for the whole
+// session while XInput had the virtual pad in slot 1 and the GameSir in slot 0,
+// so the self-test and readback were reading the physical pad.
 int ViGEmSink::userIndex() {
-    if (userIndex_ >= 0 || !target_ || !g.userIndex) return userIndex_;
-    ULONG idx = 0;
-    if (g.userIndex(client_, target_, &idx) == VIGEM_ERROR_NONE && idx < 4) userIndex_ = (int)idx;
+    if (userIndex_ >= 0 || !target_) return userIndex_;
+    int found = -1, count = 0;
+    for (auto& s : xi::slots())
+        if (s.connected && s.vid == 0x045E && s.pid == 0x028E && !(preexistingX360_ & (1u << s.slot))) { found = s.slot; count++; }
+    if (count == 1) userIndex_ = found;  // ambiguous or not there yet: unknown, never a guess
     return userIndex_;
 }
 

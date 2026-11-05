@@ -446,7 +446,7 @@ void App::drawStatusStrip() {
     } else {
         chip(snap_.input.connected ? "GameSir connected" : "GameSir NOT found - check cable / PC mode", snap_.input.connected ? kOk : kBlocked,
              "Physical controller read through XInput (VID 3537).");
-        if (virtualSlot_ >= 0) snprintf(b, sizeof b, "Virtual Xbox 360 pad: XInput slot %d", virtualSlot_ + 1);
+        if (virtualSlot_ >= 0) snprintf(b, sizeof b, "Virtual Xbox 360 pad: XInput slot %d", virtualSlot_);
         else snprintf(b, sizeof b, "Virtual Xbox 360 pad: created (slot pending)");
         chip(b, snap_.submitFailures ? kBlocked : kOk, "Created through ViGEmBus. Removed when Live Mode stops or gsmacro closes.");
     }
@@ -666,12 +666,13 @@ void App::drawLiveSelfTest() {
     sectionTitle("LIVE SELF-TEST");
     ImGui::PushTextWrapPos(0);
     if (virtualSlot_ < 0) {
-        ImGui::TextColored(kWarnV, "Waiting for Windows to assign the virtual pad an XInput slot...");
+        ImGui::TextColored(kWarnV, "Waiting for Windows to assign the virtual pad an XInput slot... If this stays, another "
+                                   "Xbox 360 pad appeared at the same time and gsmacro can't tell which slot is its own.");
     } else if (!readbackOk_) {
-        ImGui::TextColored(kErrV, "Virtual pad (slot %d) can't be read back through XInput.", virtualSlot_ + 1);
+        ImGui::TextColored(kErrV, "Virtual pad (slot %d) can't be read back through XInput.", virtualSlot_);
     } else {
         uint64_t total = selfMatch_ + selfMismatch_;
-        ImGui::Text("Virtual pad read back from XInput slot %d.", virtualSlot_ + 1);
+        ImGui::Text("Virtual pad read back from XInput slot %d.", virtualSlot_);
         if (total < 60) ImGui::TextDisabled("Move the sticks and press buttons to collect samples (%llu so far).", (unsigned long long)total);
         else {
             double pct = 100.0 * (double)selfMatch_ / (double)total;
@@ -1427,7 +1428,7 @@ void App::drawSetupWindow() {
     stepHeader(3, "Create the virtual Xbox 360 controller", live ? CheckResult::Ok : CheckResult::Unknown);
     ImGui::Indent(26 * scale_);
     if (live) {
-        if (virtualSlot_ >= 0) ImGui::TextColored(kOkV, "Virtual pad active in XInput slot %d. Macros are %s.", virtualSlot_ + 1,
+        if (virtualSlot_ >= 0) ImGui::TextColored(kOkV, "Virtual pad active in XInput slot %d. Macros are %s.", virtualSlot_,
                                                   cfg_.settings.macrosArmed ? "ARMED" : "OFF (pure passthrough)");
         else ImGui::TextColored(kWarnV, "Virtual pad created; waiting for its XInput slot.");
     } else {

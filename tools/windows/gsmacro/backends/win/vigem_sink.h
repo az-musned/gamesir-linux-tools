@@ -24,13 +24,15 @@ public:
 
     // Called from ViGEm's notification thread.
     void onRumble(uint8_t large, uint8_t smallMotor);
-    // XInput slot Windows assigned to the virtual pad, or -1 (not yet known).
+    // XInput slot Windows assigned to the virtual pad, or -1 (not yet known,
+    // or ambiguous because another new 045E:028E pad appeared at the same time).
     int userIndex();
 
 private:
     void* client_ = nullptr;
     void* target_ = nullptr;
     int userIndex_ = -1;
+    unsigned preexistingX360_ = 0;  // bit per XInput slot already 045E:028E before our pad was added
     bool notifRegistered_ = false;
     std::mutex rumbleLock_;
     std::function<void(uint8_t, uint8_t)> rumble_;

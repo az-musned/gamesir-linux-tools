@@ -48,7 +48,7 @@ GamepadState Processor::process(const GamepadState& phys, bool connected, Time n
         // Lost the controller: stop everything and present a neutral pad.
         if (prevConnected_ || sched_.running() || sched_.queued()) sched_.cancelAll(now);
         prevConnected_ = false;
-        chordSuppressed_ = false;
+        withheld_ = 0;
         leftDownAt_ = rightDownAt_ = -1;
         prev_ = GamepadState();
         return GamepadState();
@@ -69,26 +69,62 @@ GamepadState Processor::process(const GamepadState& phys, bool connected, Time n
     if (pressed & s.rightModifier) rightDownAt_ = now;
     if (released & s.rightModifier) rightDownAt_ = -1;
 
-    if (pressed & s.chordButton) {
-        int side = pickSide(phys);
-        if (side >= 0 && !s.macrosArmed) {
-            chords_.disarmed++;  // master switch off: Square behaves normally
-        } else if (side < 0) {
-            chords_.passthrough++;
-        } else if (!(side == 0 ? s.leftEnabled : s.rightEnabled) || !compiled_[side] ||
-                   (compiled_[side]->events.empty() && compiled_[side]->duration == 0)) {
-            chords_.disabled++;  // macro off: Square behaves normally
-        } else {
-            (side == 0 ? chords_.left : chords_.right)++;
-            sched_.enqueue(compiled_[side], now);  // a full queue counts a drop
-            chordSuppressed_ = true;               // withheld even if dropped: a macro was intended
+    if (s.chordOrder == ChordOrder::ShiftFirst) {
+        processShiftFirst(phys, pressed, released, now);
+    } else {
+        if (pressed & s.chordButton) {
+            int side = pickSide(phys);
+            if (side >= 0 && !s.macrosArmed) {
+                chords_.disarmed++;  // master switch off: Square behaves normally
+            } else if (side < 0) {
+                chords_.passthrough++;
+            } else if (!sideUsable(side)) {
+                chords_.disabled++;  // macro off: Square behaves normally
+            } else {
+                (side == 0 ? chords_.left : chords_.right)++;
+                sched_.enqueue(compiled_[side], now);  // a full queue counts a drop
+                withheld_ |= s.chordButton;            // withheld even if dropped: a macro was intended
+            }
         }
+        if (released & s.chordButton) withheld_ &= (uint16_t)~s.chordButton;
     }
-    if (released & s.chordButton) chordSuppressed_ = false;
     prev_ = phys;
 
     sched_.update(now);
-    return mergeOutput(phys, chordSuppressed_ ? s.chordButton : 0, sched_.overrides());
+    return mergeOutput(phys, chordMask(), sched_.overrides());
+}
+
+bool Processor::sideUsable(int side) const {
+    const Settings& s = cfg_->settings;
+    return (side == 0 ? s.leftEnabled : s.rightEnabled) && compiled_[side] &&
+           !(compiled_[side]->events.empty() && compiled_[side]->duration == 0);
+}
+
+// Shift-first: the chord button is held as a shift key and a bumper TAP picks
+// the side. The bumper press that starts a macro is withheld until that bumper
+// is released (it never becomes air roll); a bumper tapped without the shift
+// passes through at once. The shift button itself is masked in chordMask().
+void Processor::processShiftFirst(const GamepadState& phys, uint16_t pressed, uint16_t released, Time now) {
+    const Settings& s = cfg_->settings;
+    // Release first, so a release+re-press inside one sample is not merged.
+    withheld_ &= (uint16_t)~(released & (s.leftModifier | s.rightModifier));
+    if (!phys.has(s.chordButton)) return;  // shift not held (it may be pressed in this same sample: that counts)
+    bool l = (pressed & s.leftModifier) != 0, r = (pressed & s.rightModifier) != 0;
+    if (!l && !r) return;
+    int side = l && r ? (s.bothBumpers == BothBumpers::Right ? 1 : s.bothBumpers == BothBumpers::Ignore ? -1 : 0) : l ? 0 : 1;
+    if (side < 0) { chords_.passthrough++; return; }
+    if (!s.macrosArmed) { chords_.disarmed++; return; }  // pure passthrough
+    if (!sideUsable(side)) { chords_.disabled++; return; }  // bumper behaves normally
+    (side == 0 ? chords_.left : chords_.right)++;
+    sched_.enqueue(compiled_[side], now);  // a full queue counts a drop
+    withheld_ |= side == 0 ? s.leftModifier : s.rightModifier;
+}
+
+uint16_t Processor::chordMask() const {
+    const Settings& s = cfg_->settings;
+    uint16_t m = withheld_;
+    if (s.chordOrder == ChordOrder::ShiftFirst && s.macrosArmed) m |= s.chordButton;  // shift key never reaches the game
+    return m;
 }
 
 }  // namespace gsm

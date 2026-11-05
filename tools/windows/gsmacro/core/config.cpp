@@ -19,6 +19,8 @@ const char* bothBumpersName(BothBumpers b) {
     return "latest";
 }
 
+const char* chordOrderName(ChordOrder o) { return o == ChordOrder::ShiftFirst ? "shift_first" : "bumper_first"; }
+
 void sanitize(Settings* s) {
     s->pollPeriodUs = std::clamp(s->pollPeriodUs, 100.0, 16000.0);
     s->spinTailUs = std::clamp(s->spinTailUs, 0.0, 2000.0);
@@ -70,6 +72,7 @@ std::string configToText(const Config& c) {
              "queue_capacity = %d\n"
              "inter_macro_gap_ms = %.6g\n"
              "both_bumpers = %s\n"
+             "chord_order = %s\n"
              "left_enabled = %s\n"
              "right_enabled = %s\n"
              "macros_armed = %s\n"
@@ -78,7 +81,7 @@ std::string configToText(const Config& c) {
              "right_modifier = %s\n"
              "game_tick_hz = %.6g\n",
              s.pollPeriodUs, s.spinTailUs, s.queueCapacity, s.interMacroGapMs, bothBumpersName(s.bothBumpers),
-             s.leftEnabled ? "true" : "false", s.rightEnabled ? "true" : "false", s.macrosArmed ? "true" : "false",
+             chordOrderName(s.chordOrder), s.leftEnabled ? "true" : "false", s.rightEnabled ? "true" : "false", s.macrosArmed ? "true" : "false",
              buttonOrDefault(s.chordButton), buttonOrDefault(s.leftModifier), buttonOrDefault(s.rightModifier),
              s.gameTickHz);
     std::string out = buf;
@@ -170,6 +173,11 @@ bool configFromText(const std::string& text, Config* out, std::string* err) {
                 else if (l == "right") s.bothBumpers = BothBumpers::Right;
                 else if (l == "ignore") s.bothBumpers = BothBumpers::Ignore;
                 else return fail("both_bumpers must be latest|left|right|ignore");
+            } else if (k == "chord_order") {
+                std::string l = lower(v);
+                if (l == "bumper_first") s.chordOrder = ChordOrder::BumperFirst;
+                else if (l == "shift_first") s.chordOrder = ChordOrder::ShiftFirst;
+                else return fail("chord_order must be bumper_first|shift_first");
             } else if (k == "chord_button" || k == "left_modifier" || k == "right_modifier") {
                 uint16_t bit = buttonFromName(v);
                 if (!bit) return fail("unknown button '" + v + "'");

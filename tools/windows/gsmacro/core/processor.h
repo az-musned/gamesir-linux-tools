@@ -10,6 +10,10 @@
 // whether a bumper follows, so normal Square has no added delay. A Square
 // press that starts a macro is withheld from the game until Square is
 // released. L1/R1 always pass through unless a macro step overrides them.
+//
+// chord_order = shift_first reverses the roles: Square is held as a shift
+// key (hidden from the game while macros are armed) and an L1/R1 press picks
+// the side; that bumper press is withheld until released. See ChordOrder.
 #pragma once
 #include <memory>
 
@@ -42,19 +46,22 @@ public:
 
     const MacroScheduler& scheduler() const { return sched_; }
     MacroScheduler& scheduler() { return sched_; }
-    uint16_t chordMask() const { return chordSuppressed_ ? cfg_->settings.chordButton : 0; }
+    // Physical buttons currently hidden from the game by the chord logic.
+    uint16_t chordMask() const;
     const ChordCounters& chordCounters() const { return chords_; }
     const CompiledMacro* compiled(int side) const { return compiled_[side].get(); }
 
 private:
     int pickSide(const GamepadState& phys) const;
+    bool sideUsable(int side) const;
+    void processShiftFirst(const GamepadState& phys, uint16_t pressed, uint16_t released, Time now);
 
     std::shared_ptr<const Config> cfg_;
     std::shared_ptr<const CompiledMacro> compiled_[2];
     MacroScheduler sched_;
     GamepadState prev_;
     bool prevConnected_ = false;
-    bool chordSuppressed_ = false;
+    uint16_t withheld_ = 0;  // triggering press held back until released (Square, or a bumper in shift-first)
     Time leftDownAt_ = -1, rightDownAt_ = -1;
     ChordCounters chords_;
 };

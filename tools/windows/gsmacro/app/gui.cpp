@@ -1190,6 +1190,12 @@ void App::drawSyncSettings() {
     if (ImGui::SliderInt("FIFO queue", &qc, 0, MacroScheduler::kMaxQueue)) { s.queueCapacity = qc; c = true; }
     helpMarker("Activations allowed to wait behind the running macro (0 = presses during a macro are ignored). Extra presses are "
                "dropped and counted in Diagnostics. Macros never overlap.");
+    int co = (int)s.chordOrder;
+    const char* coNames[] = {"hold bumper, tap chord button", "hold chord button (shift), tap bumper"};
+    if (ImGui::Combo("Trigger order", &co, coNames, 2)) { s.chordOrder = (ChordOrder)co; c = true; }
+    helpMarker("hold bumper, tap chord button: hold L1/R1, tap Square. Square alone and L1/R1 always reach the game.\n"
+               "hold chord button (shift), tap bumper: hold Square as a shift key, tap L1 (left macro) or R1 (right macro). "
+               "While macros are armed Square never reaches the game; L1/R1 tapped without it pass through with no delay.");
     int bb = (int)s.bothBumpers;
     const char* bbNames[] = {"latest pressed", "always left", "always right", "no macro"};
     if (ImGui::Combo("L1+R1+Square", &bb, bbNames, 4)) { s.bothBumpers = (BothBumpers)bb; c = true; }

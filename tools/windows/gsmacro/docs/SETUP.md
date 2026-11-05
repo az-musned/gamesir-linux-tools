@@ -46,20 +46,41 @@ in the top bar). Work through the steps in order:
    compares the virtual pad (read back through XInput) with gsmacro's output.
    Tick the box when everything behaves normally.
 5. **HidHide available.**
-6. **Hide the physical pad (manual).** In HidHide Configuration Client:
+6. **Hide the physical pad (manual).** Stop Live Mode first, so gsmacro's
+   own pad is not in HidHide's list. In HidHide Configuration Client:
    * Applications tab: add `gsmacro.exe`.
-   * Devices tab: tick the GameSir entries, then tick *Enable device hiding*.
-   * `joy.cpl` should now list exactly one controller.
-7. **Arm macros.** Test each macro with **Test** and with L1/R1 + Square while
-   watching the output timeline.
+   * Devices tab: tick the GameSir entry ("Controller (Xbox 360 for
+     Windows)"), then tick *Enable device hiding*. Close the client.
+   * The GUI hides only the pad's **HID** side (what `joy.cpl` reads). Games
+     using **XInput** (Rocket League) still see it. Also hide its XInput
+     device from an **administrator** Command Prompt (HidHide client closed;
+     take the instance path from Device Manager > Xbox 360 Peripherals >
+     *Xbox 360 Controller for Windows* > Details > Device instance path):
+     ```
+     "C:\Program Files\Nefarius Software Solutions\HidHide\x64\HidHideCLI.exe" --dev-hide "USB\VID_3537&PID_103D&MI_00\<instance>"
+     ```
+     Undo with `--dev-unhide` and the same path.
+   * Replug the pad. `joy.cpl` should list exactly one controller, and
+     `gsm_bench slots` (not on the allow list) should list only `045E:028E`.
+7. **Arm macros.** Test each macro with **Test** and with the chord while
+   watching the output timeline. *Trigger order* picks the chord: hold L1/R1
+   and tap Square (default), or hold Square as a shift key and tap L1/R1
+   (`chord_order = shift_first`).
+
+**Player 1 / player 2:** Windows gives XInput slots in connection order, and
+a hidden pad still holds its slot. If the GameSir connected first, the
+virtual pad sits in slot 1 and games treat it as **player 2**. Start Live
+Mode **before** plugging the pad in (or unplug it, Start Live Mode, replug):
+the virtual pad then takes slot 0.
 8. **Turning it off.** Click **Demo** or **Stop Live Mode**, or close
    gsmacro: the virtual pad disappears with every input released.
 
 ## Undo everything / restore normal controller use
 
 * Stop Live Mode or close gsmacro. The virtual pad is removed immediately.
-* In HidHide, untick the GameSir (or *Enable device hiding*). Games see the
-  physical pad again. Replug it if a running game doesn't notice.
+* In HidHide, untick the GameSir (or *Enable device hiding*), and remove the
+  XInput entry with `HidHideCLI.exe --dev-unhide "USB\VID_3537&PID_103D&MI_00\<instance>"`
+  (administrator, client closed). Replug the pad. Games see it again.
 * Re-apply your reWASD config if you want to go back to reWASD.
 
 ## Your macros

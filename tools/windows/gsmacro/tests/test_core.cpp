@@ -151,6 +151,120 @@ TEST("chord: custom chord and modifier buttons") {
     CHECK(!o.has(BTN_Y));
 }
 
+// ───────────── chord order: shift first (hold Square, tap bumper) ─────────────
+
+namespace {
+Config shiftFirstConfig() {
+    Config c = testConfig();
+    c.settings.chordOrder = ChordOrder::ShiftFirst;
+    return c;
+}
+}  // namespace
+
+TEST("shift-first: Square is a shift key and never reaches the game while armed") {
+    Rig r(shiftFirstConfig());
+    r.step(0, pad(0));
+    GamepadState o = r.step(ms(1), pad(BTN_X));
+    CHECK(!o.has(BTN_X));
+    CHECK(!r.p.scheduler().running());
+    o = r.step(ms(50), pad(BTN_X));
+    CHECK(!o.has(BTN_X));
+    o = r.step(ms(5), pad(0));
+    CHECK(!o.has(BTN_X));
+}
+
+TEST("shift-first: Square held + R1 tap starts the right macro in the same sample, R1 withheld") {
+    Rig r(shiftFirstConfig());
+    r.step(0, pad(BTN_X));
+    GamepadState o = r.step(ms(20), pad(BTN_X | BTN_RB));
+    CHECK_EQ(r.p.scheduler().currentId(), 1);
+    CHECK(o.has(BTN_B));                  // macro output, no added sample of delay
+    CHECK(!o.has(BTN_RB) && !o.has(BTN_X));
+    o = r.step(ms(50), pad(BTN_X | BTN_RB));  // macro over, R1 still held: still withheld
+    CHECK(!r.p.scheduler().running());
+    CHECK(!o.has(BTN_RB));
+    o = r.step(ms(5), pad(BTN_X));        // R1 released
+    CHECK(!o.has(BTN_RB));
+    o = r.step(ms(5), pad(0));
+    o = r.step(ms(5), pad(BTN_RB));       // R1 alone afterwards: air roll again
+    CHECK(o.has(BTN_RB));
+}
+
+TEST("shift-first: Square held + L1 tap starts the left macro") {
+    Rig r(shiftFirstConfig());
+    r.step(0, pad(BTN_X));
+    GamepadState o = r.step(ms(5), pad(BTN_X | BTN_LB));
+    CHECK_EQ(r.p.scheduler().currentId(), 0);
+    CHECK(o.has(BTN_A) && !o.has(BTN_LB) && o.lx == -32768);
+}
+
+TEST("shift-first: Square and a bumper in the same sample count; bumper alone passes at once") {
+    Rig r(shiftFirstConfig());
+    r.step(0, pad(0));
+    GamepadState o = r.step(ms(1), pad(BTN_LB));
+    CHECK(o.has(BTN_LB));
+    CHECK(!r.p.scheduler().running());
+    r.step(ms(5), pad(0));
+    r.step(ms(1), pad(BTN_X | BTN_RB));
+    CHECK_EQ(r.p.scheduler().currentId(), 1);
+}
+
+TEST("shift-first: a bumper already held when Square goes down does not trigger") {
+    Rig r(shiftFirstConfig());
+    r.step(0, pad(BTN_LB));
+    GamepadState o = r.step(ms(10), pad(BTN_LB | BTN_X));
+    CHECK(!r.p.scheduler().running());
+    CHECK(o.has(BTN_LB) && !o.has(BTN_X));
+}
+
+TEST("shift-first: disarmed is pure passthrough, Square included") {
+    Config c = shiftFirstConfig();
+    c.settings.macrosArmed = false;
+    Rig r(c);
+    r.step(0, pad(BTN_X));
+    GamepadState o = r.step(ms(5), pad(BTN_X | BTN_RB));
+    CHECK(!r.p.scheduler().running());
+    CHECK(o.has(BTN_X) && o.has(BTN_RB));
+    CHECK_EQ(r.p.chordCounters().disarmed, 1u);
+}
+
+TEST("shift-first: disabled side lets the bumper through") {
+    Config c = shiftFirstConfig();
+    c.settings.rightEnabled = false;
+    Rig r(c);
+    r.step(0, pad(BTN_X));
+    GamepadState o = r.step(ms(5), pad(BTN_X | BTN_RB));
+    CHECK(!r.p.scheduler().running());
+    CHECK(o.has(BTN_RB) && !o.has(BTN_X));
+    CHECK_EQ(r.p.chordCounters().disabled, 1u);
+}
+
+TEST("shift-first: repeated taps while Square stays held queue FIFO; disconnect clears withheld") {
+    Rig r(shiftFirstConfig());
+    r.step(0, pad(BTN_X));
+    r.step(ms(1), pad(BTN_X | BTN_RB));
+    r.step(ms(2), pad(BTN_X));
+    r.step(ms(2), pad(BTN_X | BTN_LB));
+    CHECK_EQ(r.p.scheduler().currentId(), 1);
+    CHECK_EQ(r.p.scheduler().queued(), 1);
+    GamepadState o = r.step(ms(1), pad(BTN_X | BTN_LB), false);
+    CHECK(o == GamepadState());
+    o = r.step(ms(100), pad(BTN_LB));  // reconnect with L1 held: baseline, not a tap
+    CHECK(o.has(BTN_LB));
+    CHECK(!r.p.scheduler().running());
+}
+
+TEST("config: chord_order round trip, default bumper_first, bad value rejected") {
+    Config c = shiftFirstConfig();
+    Config back;
+    std::string err;
+    CHECK(configFromText(configToText(c), &back, &err));
+    CHECK(back.settings.chordOrder == ChordOrder::ShiftFirst);
+    CHECK(configFromText("[settings]\npoll_period_us = 500\n", &back, &err));
+    CHECK(back.settings.chordOrder == ChordOrder::BumperFirst);
+    CHECK(!configFromText("[settings]\nchord_order = sideways\n", &back, &err));
+}
+
 // ───────────── timing ─────────────
 
 TEST("timing: events fire exactly at their offsets") {

@@ -279,3 +279,13 @@ read-only system snapshot (`inspect.ps1`) and a guided test session
 only system DLLs, but it has **not yet been run on the target PC**. No
 measured results exist yet. Phases 1, 2 and 4 of the verification are waiting
 on the `results\` folder from `run-tests.ps1`.
+
+## Follow-up: offline implementation
+
+`tools/windows/gsmacro/` holds the approach-D application: a portable core
+(chord detection, FIFO scheduler with absolute deadlines, input merging,
+engine thread), mock/demo backends, an ImGui GUI, and Windows XInput / ViGEm
+/ HidHide-status backends behind interfaces. It was built and tested offline
+only: 42 tests pass on Linux, under ThreadSanitizer and ASan/UBSan, and as a
+Windows binary under Wine. **The Windows hardware path is untested.** Its
+README lists the hardware-dependent tasks.

@@ -1,0 +1,58 @@
+// The per-sample pipeline: chord detection -> scheduler -> merge.
+//
+// process() is pure apart from its own state and the clock value passed in.
+// It does not allocate, so the same code runs in the engine thread, the demo
+// and the tests.
+//
+// Chord rule: the macro fires when the chord button (Square) goes DOWN while
+// a modifier (L1 or R1) is ALREADY held, or goes down in the same sample.
+// Square pressed alone is passed through at once: nothing waits to see
+// whether a bumper follows, so normal Square has no added delay. A Square
+// press that starts a macro is withheld from the game until Square is
+// released. L1/R1 always pass through unless a macro step overrides them.
+#pragma once
+#include <memory>
+
+#include "config.h"
+#include "scheduler.h"
+
+namespace gsm {
+
+struct ChordCounters {
+    uint64_t left = 0, right = 0, passthrough = 0, disabled = 0;
+};
+
+GamepadState mergeOutput(const GamepadState& phys, uint16_t chordMask, const Overrides& ov);
+
+class Processor {
+public:
+    Processor();
+    // Compiles both macros; the running macro keeps its own copy, so an edit
+    // takes effect from the next activation.
+    void setConfig(std::shared_ptr<const Config> cfg);
+    std::shared_ptr<const Config> config() const { return cfg_; }
+
+    GamepadState process(const GamepadState& phys, bool connected, Time now);
+    Time nextDeadline() const { return sched_.nextDeadline(); }
+    void cancel(Time now) { sched_.cancelAll(now); }
+
+    const MacroScheduler& scheduler() const { return sched_; }
+    MacroScheduler& scheduler() { return sched_; }
+    uint16_t chordMask() const { return chordSuppressed_ ? cfg_->settings.chordButton : 0; }
+    const ChordCounters& chordCounters() const { return chords_; }
+    const CompiledMacro* compiled(int side) const { return compiled_[side].get(); }
+
+private:
+    int pickSide(const GamepadState& phys) const;
+
+    std::shared_ptr<const Config> cfg_;
+    std::shared_ptr<const CompiledMacro> compiled_[2];
+    MacroScheduler sched_;
+    GamepadState prev_;
+    bool prevConnected_ = false;
+    bool chordSuppressed_ = false;
+    Time leftDownAt_ = -1, rightDownAt_ = -1;
+    ChordCounters chords_;
+};
+
+}  // namespace gsm

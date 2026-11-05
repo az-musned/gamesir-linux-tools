@@ -1,0 +1,28 @@
+// Non-Windows host: Demo Mode only (used for development, tests and screenshots).
+#include <sys/resource.h>
+
+#include <cstdlib>
+
+#include "../backends/portable_waiter.h"
+#include "platform.h"
+
+namespace gsm {
+
+double processCpuSeconds() {
+    rusage u{};
+    getrusage(RUSAGE_SELF, &u);
+    return (double)u.ru_utime.tv_sec + u.ru_utime.tv_usec / 1e6 + (double)u.ru_stime.tv_sec + u.ru_stime.tv_usec / 1e6;
+}
+
+std::unique_ptr<IWaiter> makeEngineWaiter() { return std::make_unique<PortableWaiter>(); }
+
+std::string defaultConfigPath() {
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") + "/.gsmacro.cfg";
+}
+
+bool liveBackendsAvailable() { return false; }
+std::string createLiveBackends(LiveBackends*) { return "Live mode needs the Windows build (XInput + ViGEmBus)."; }
+std::string hidHideStatusText() { return "HidHide is Windows-only (not applicable on this host)."; }
+
+}  // namespace gsm

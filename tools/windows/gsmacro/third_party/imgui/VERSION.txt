@@ -1,0 +1,1 @@
+Dear ImGui v1.91.9 (commit 97428e8ac99e339ce05eee531cf55b77b29ea709), MIT. Unmodified subset: core + glfw/opengl3/win32/dx11 backends.

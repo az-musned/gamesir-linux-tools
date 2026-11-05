@@ -268,3 +268,14 @@ since it is the only zero-latency path that stays within your constraints.
    frame times. Camera end-to-end (step 4).
 5. **Hardening.** Device re-plug, ViGEm target recreation, a tray toggle, and
    a guard that releases all overrides if the thread stalls.
+
+---
+
+## Follow-up: on-device verification (status)
+
+`tools/windows/gsprobe/` holds the read-only probe (`gsprobe.cpp`), a
+read-only system snapshot (`inspect.ps1`) and a guided test session
+(`run-tests.ps1`). The probe cross-compiles cleanly with MinGW-w64 and needs
+only system DLLs, but it has **not yet been run on the target PC**. No
+measured results exist yet. Phases 1, 2 and 4 of the verification are waiting
+on the `results\` folder from `run-tests.ps1`.

@@ -19,7 +19,7 @@
 namespace gsm {
 
 struct ChordCounters {
-    uint64_t left = 0, right = 0, passthrough = 0, disabled = 0;
+    uint64_t left = 0, right = 0, passthrough = 0, disabled = 0, disarmed = 0, manual = 0;
 };
 
 GamepadState mergeOutput(const GamepadState& phys, uint16_t chordMask, const Overrides& ov);
@@ -35,6 +35,10 @@ public:
     GamepadState process(const GamepadState& phys, bool connected, Time now);
     Time nextDeadline() const { return sched_.nextDeadline(); }
     void cancel(Time now) { sched_.cancelAll(now); }
+    // Queue a macro without a chord (GUI "Test" button, benchmarks). Ignores
+    // the armed/enabled switches - it is an explicit request - but still
+    // obeys the FIFO. Returns false if the macro is empty or the queue is full.
+    bool trigger(int side, Time now);
 
     const MacroScheduler& scheduler() const { return sched_; }
     MacroScheduler& scheduler() { return sched_; }

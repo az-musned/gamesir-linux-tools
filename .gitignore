@@ -51,3 +51,6 @@ mouse-backups/
 # only the derived vector outline (qml/App/MouseView.qml); see docs/CREDITS.md. The model
 # is CC-BY 4.0 by Okopchi (https://skfb.ly/p8PWQ).
 assets/source/502.fbx
+
+# gsmacro release output
+tools/windows/gsmacro/dist/

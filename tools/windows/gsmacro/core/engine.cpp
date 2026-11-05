@@ -120,6 +120,10 @@ void Engine::run() {
             if (c) proc_.setConfig(std::move(c));
         }
         if (cancelReq_.exchange(false)) proc_.cancel(now);
+        if (unsigned tr = triggerReq_.exchange(0)) {
+            if (tr & 1) proc_.trigger(0, now);
+            if (tr & 2) proc_.trigger(1, now);
+        }
         if (resetReq_.exchange(false)) {
             proc_.scheduler().resetStats();
             Histogram empty;
@@ -141,7 +145,7 @@ void Engine::run() {
             local_.submits++;
             if (!ok) local_.submitFailures++;
             lastOut = out;
-            haveOut = true;
+            haveOut = ok;  // a failed submit is retried on the next cycle
         }
         int macro = proc_.scheduler().currentId();
         if (inputChanged || outChanged || macro != lastMacro) {
@@ -182,7 +186,20 @@ void Engine::run() {
         if (byEvent) local_.wakesByEvent++;
         else local_.wakeError.add(clock_.now() - target);
     }
-    publish(clock_.now(), lastIn, lastOut);
+    // Leave the output neutral so stopping can never leave a button or stick
+    // held on the virtual pad.
+    GamepadState neutral;
+    if (!haveOut || lastOut != neutral) {
+        out_->submit(neutral);
+        local_.submits++;
+        TimelineSample ts;
+        ts.t = clock_.now();
+        ts.in = lastIn.state;
+        ts.out = neutral;
+        ts.connected = lastIn.connected;
+        pushTimeline(ts);
+    }
+    publish(clock_.now(), lastIn, neutral);
 }
 
 }  // namespace gsm

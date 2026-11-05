@@ -6,7 +6,10 @@
 // * Events fire at absolute times (start + offset). A late update applies
 //   every due event at once, so lateness never accumulates.
 // * The next queued macro starts `gap` after the previous one's scheduled
-//   end, so the game sees a neutral frame between them.
+//   end (0 allowed). Ending a macro always produces one update with every
+//   override released before the next macro starts, so press/release edges
+//   are never merged - but only a gap of at least one game tick guarantees
+//   the GAME samples that release.
 // * Ending or cancelling a macro drops every override it holds.
 #pragma once
 #include <array>

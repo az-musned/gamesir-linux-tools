@@ -37,7 +37,7 @@ Config defaultConfig() {
     for (int side = 0; side < 2; side++) {
         double dir = side == 0 ? -1.0 : 1.0;
         Macro& m = c.macros[side];
-        m.name = side == 0 ? "Wall dash left (template)" : "Wall dash right (template)";
+        m.name = side == 0 ? "Wall dash left (example)" : "Wall dash right (example)";
         m.actions = {
             Action::setAxis(AX_LX, dir),   // stick toward the dash side
             Action::setAxis(AX_LY, 0.0),
@@ -61,7 +61,7 @@ static const char* buttonOrDefault(uint16_t b) { return buttonName(b); }
 
 std::string configToText(const Config& c) {
     const Settings& s = c.settings;
-    char buf[1024];
+    char buf[1200];
     snprintf(buf, sizeof buf,
              "# gsmacro configuration\n"
              "[settings]\n"
@@ -72,12 +72,13 @@ std::string configToText(const Config& c) {
              "both_bumpers = %s\n"
              "left_enabled = %s\n"
              "right_enabled = %s\n"
+             "macros_armed = %s\n"
              "chord_button = %s\n"
              "left_modifier = %s\n"
              "right_modifier = %s\n"
              "game_tick_hz = %.6g\n",
              s.pollPeriodUs, s.spinTailUs, s.queueCapacity, s.interMacroGapMs, bothBumpersName(s.bothBumpers),
-             s.leftEnabled ? "true" : "false", s.rightEnabled ? "true" : "false",
+             s.leftEnabled ? "true" : "false", s.rightEnabled ? "true" : "false", s.macrosArmed ? "true" : "false",
              buttonOrDefault(s.chordButton), buttonOrDefault(s.leftModifier), buttonOrDefault(s.rightModifier),
              s.gameTickHz);
     std::string out = buf;
@@ -138,8 +139,13 @@ bool configFromText(const std::string& text, Config* out, std::string* err) {
         if (line.front() == '[') {
             std::string h = lower(trim(line.substr(1, line.find(']') == std::string::npos ? std::string::npos : line.find(']') - 1)));
             if (h == "settings") { section = SETTINGS; continue; }
-            if (h == "macro left") { section = MACRO; macroIdx = 0; seenMacro[0] = true; continue; }
-            if (h == "macro right") { section = MACRO; macroIdx = 1; seenMacro[1] = true; continue; }
+            if (h == "macro left" || h == "macro right") {
+                macroIdx = h == "macro left" ? 0 : 1;
+                if (seenMacro[macroIdx]) return fail("duplicate section [" + h + "]");
+                seenMacro[macroIdx] = true;
+                section = MACRO;
+                continue;
+            }
             return fail("unknown section [" + h + "]");
         }
         size_t eq = line.find('=');
@@ -156,6 +162,7 @@ bool configFromText(const std::string& text, Config* out, std::string* err) {
             else if (k == "game_tick_hz") { if (!parseDouble(v, &d)) return fail("bad number"); s.gameTickHz = d; }
             else if (k == "left_enabled") { if (!parseBool(v, &b)) return fail("bad bool"); s.leftEnabled = b; }
             else if (k == "right_enabled") { if (!parseBool(v, &b)) return fail("bad bool"); s.rightEnabled = b; }
+            else if (k == "macros_armed") { if (!parseBool(v, &b)) return fail("bad bool"); s.macrosArmed = b; }
             else if (k == "both_bumpers") {
                 std::string l = lower(v);
                 if (l == "latest") s.bothBumpers = BothBumpers::Latest;

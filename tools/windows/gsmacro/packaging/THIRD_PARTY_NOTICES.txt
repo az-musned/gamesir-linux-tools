@@ -1,0 +1,21 @@
+gsmacro includes or is built with the following third-party software.
+Full license texts are in the licenses\ folder.
+
+Dear ImGui 1.91.9 (commit 97428e8)        MIT License      - Omar Cornut
+  Statically linked into gsmacro.exe. https://github.com/ocornut/imgui
+
+ViGEmClient v1.21.222.0 (commit 9e842ba)  MIT License      - Benjamin Hoeglinger-Stelzer
+  Shipped as ViGEmClient.dll, compiled unmodified from the official source
+  https://github.com/nefarius/ViGEmClient (user-mode library only; the
+  ViGEmBus driver is NOT included and is never installed by gsmacro).
+
+MinGW-w64 runtime and winpthreads          expat (MIT) / BSD / public domain
+  Statically linked. See licenses\mingw-w64-runtime-copyright.txt.
+
+GCC runtime libraries (libstdc++, libgcc)  GPLv3 with the GCC Runtime Library Exception
+  Statically linked under the Runtime Library Exception, which permits this
+  for any program. See licenses\gcc-runtime-library-exception.txt.
+
+Not included, used if present on the PC:
+  ViGEmBus driver (Nefarius), HidHide driver (Nefarius), XInput 1.4 and
+  Direct3D 11 (part of Windows).

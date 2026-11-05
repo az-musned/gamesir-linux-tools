@@ -84,6 +84,10 @@ int main(int argc, char** argv) {
                 {4430, nullptr, "06-disconnect.ppm"},
                 {5200, [](gsm::App& a) { a.setTextMode(0, true); }, nullptr},
                 {5400, nullptr, "07-text-editor.ppm"},
+                {5500, [](gsm::App& a) { a.setTextMode(0, false); a.selectMacroTab(1); a.triggerMacro(1); }, nullptr},
+                {5560, nullptr, "08-test-button-right.ppm"},
+                {6000, [](gsm::App& a) { a.showSetup(true); }, nullptr},
+                {6200, nullptr, "09-setup-wizard.ppm"},
             };
         }
         size_t next = 0;

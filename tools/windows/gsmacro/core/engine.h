@@ -65,6 +65,8 @@ public:
 
     void setConfig(std::shared_ptr<const Config> cfg);
     void cancelMacros() { cancelReq_ = true; waiter_.wake(); }
+    // Queue a macro as if its chord was pressed (GUI "Test" button, bench).
+    void triggerMacro(int side) { triggerReq_.fetch_or(side == 0 ? 1u : 2u); waiter_.wake(); }
     void resetStats() { resetReq_ = true; waiter_.wake(); }
 
     void snapshot(EngineSnapshot* out);
@@ -82,6 +84,7 @@ private:
     IOutputSink* out_ = nullptr;
     std::thread thread_;
     std::atomic<bool> running_{false}, stopReq_{false}, cancelReq_{false}, resetReq_{false};
+    std::atomic<unsigned> triggerReq_{0};
 
     std::mutex cfgLock_;
     std::shared_ptr<const Config> pendingCfg_;

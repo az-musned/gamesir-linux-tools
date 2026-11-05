@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -93,11 +95,24 @@ App::App() {
     engine_ = std::make_unique<Engine>(clock_, *waiter_);
     scenarios_ = builtinScenarios();
     cfgPath_ = defaultConfigPath();
+    ioPath_ = cfgPath_;
     std::string err;
-    if (loadConfigFile(cfgPath_, &cfg_, &err)) fileStatus_ = "Loaded " + cfgPath_;
-    else { cfg_ = defaultConfig(); fileStatus_ = "Using built-in templates (no saved config yet)"; }
-    hidHideText_ = hidHideStatusText();
+    bool existed = std::ifstream(cfgPath_).good();
+    if (existed && loadConfigFile(cfgPath_, &cfg_, &err)) {
+        setStatus("Loaded " + cfgPath_, false);
+    } else {
+        cfg_ = defaultConfig();
+        if (existed) {
+            setStatus("Could not load " + cfgPath_ + " - using the built-in example macros", true);
+            showError("Your saved configuration could not be loaded", err,
+                      "The file was left untouched. Fix the line mentioned above in a text editor, or use Export to "
+                      "overwrite it with the current settings.");
+        } else {
+            setStatus("No saved configuration yet - using the built-in EXAMPLE macros (not your wall-dash timings)", false);
+        }
+    }
     startDemo();
+    if (liveBackendsAvailable() && !existed) showSetup(true);  // first run on Windows
 }
 
 App::~App() {
@@ -108,6 +123,8 @@ App::~App() {
 void App::stopEngine() {
     engine_->stop();
     live_ = LiveBackends();
+    virtualSlot_ = -1;
+    readbackOk_ = false;
 }
 
 void App::startDemo() {
@@ -116,34 +133,72 @@ void App::startDemo() {
     mode_ = Mode::Demo;
     demoIn_.set(GamepadState(), true);
     std::string err;
-    if (!engine_->start(&demoIn_, &demoOut_, std::make_shared<const Config>(cfg_), &err)) engineError_ = err;
-    else engineError_.clear();
+    if (!engine_->start(&demoIn_, &demoOut_, std::make_shared<const Config>(cfg_), &err))
+        showError("Demo Mode could not start", err, "This should not happen; please report it with the message above.");
     timeline_.clear();
 }
 
 void App::startLive() {
     player_.stop();
     stopEngine();
+    // Live Mode always starts as pure passthrough: macros are armed only after
+    // the user has confirmed normal input works.
+    cfg_.settings.macrosArmed = false;
+    confirmedPassthrough_ = false;
+    selfMatch_ = selfMismatch_ = 0;
     LiveBackends lb;
     std::string err = createLiveBackends(&lb);
     if (err.empty()) {
         live_ = std::move(lb);
         if (engine_->start(live_.input.get(), live_.output.get(), std::make_shared<const Config>(cfg_), &err)) {
             mode_ = Mode::Live;
-            engineError_.clear();
             timeline_.clear();
             return;
         }
         live_ = LiveBackends();
     }
-    engineError_ = "Live start failed: " + err;
+    std::string guidance;
+    if (err.find("ViGEmClient.dll") != std::string::npos)
+        guidance = "Keep ViGEmClient.dll in the same folder as gsmacro.exe (re-extract the ZIP if it is missing).";
+    else if (err.find("ViGEmBus") != std::string::npos || err.find("vigem_connect") != std::string::npos)
+        guidance = "The ViGEmBus driver is not reachable. Check Device Manager > System devices > 'Nefarius Virtual Gamepad "
+                   "Emulation Bus'. gsmacro never installs drivers.";
+    else if (err.find("xinput") != std::string::npos)
+        guidance = "XInput is unavailable. gsmacro needs Windows 10 or 11.";
+    else
+        guidance = "Run the setup checks (Setup button) to see which part is missing.";
     startDemo();
-    engineError_ = "Live start failed: " + err;
+    showError("Live Mode could not start", err, guidance + " gsmacro is back in Demo Mode; your controller is unaffected.");
 }
 
 void App::applyConfig() {
     sanitize(&cfg_.settings);
     engine_->setConfig(std::make_shared<const Config>(cfg_));
+}
+
+void App::setTextMode(int side, bool on) {
+    textMode_[side] = on;
+    if (on) { textBuf_[side] = macroToText(cfg_.macros[side]); textErr_[side].clear(); }
+}
+
+void App::runChecks() {
+    chkController_ = checkController();
+    chkViGEm_ = checkViGEm();
+    chkHidHide_ = checkHidHide();
+}
+
+void App::showError(const std::string& title, const std::string& text, const std::string& guidance) {
+    errTitle_ = title;
+    errText_ = text;
+    errGuidance_ = guidance;
+    errPending_ = true;
+}
+
+bool App::choosePath(bool save, std::string* path) {
+    if (pickFile(save, path)) return true;
+    // No native dialog on this host: use the path typed in the box.
+    if (!liveBackendsAvailable()) { *path = ioPath_; return !path->empty(); }
+    return false;  // cancelled
 }
 
 bool App::playScenario(const std::string& name) {
@@ -154,6 +209,21 @@ bool App::playScenario(const std::string& name) {
             return true;
         }
     return false;
+}
+
+void App::updateSelfTest() {
+    if (mode_ != Mode::Live) return;
+    Time now = clock_.now();
+    if (virtualSlot_ < 0) virtualSlot_ = virtualPadSlot(&live_);
+    readbackOk_ = virtualSlot_ >= 0 && readXInputSlot(virtualSlot_, &readback_);
+    // Compare only once the engine output has been stable for 30 ms, so the
+    // GUI's own sampling lag never counts as a mismatch.
+    if (snap_.output != prevSnapOut_) {
+        prevSnapOut_ = snap_.output;
+        outStableSince_ = now;
+    } else if (readbackOk_ && now - outStableSince_ > ms(30)) {
+        (readback_ == snap_.output ? selfMatch_ : selfMismatch_)++;
+    }
 }
 
 void App::pollEngine() {
@@ -177,7 +247,9 @@ void App::pollEngine() {
         rateBaseTime_ = now;
         rateBaseProcCpu_ = pc;
     }
+    updateSelfTest();
 }
+
 
 // ───────────────────────── style ─────────────────────────
 
@@ -244,6 +316,7 @@ void App::applyStyle(float scale) {
     s.ScaleAllSizes(scale);
 }
 
+
 // ───────────────────────── frame ─────────────────────────
 
 void App::frame() {
@@ -262,9 +335,9 @@ void App::frame() {
     ImGui::Begin("##root", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                         ImGuiWindowFlags_NoBringToFrontOnFocus);
     drawTopBar();
-    ImGui::Spacing();
+    drawStatusStrip();
 
-    float left = 372 * scale_, right = 372 * scale_;
+    float left = 372 * scale_, right = 380 * scale_;
     if (ImGui::BeginTable("##layout", 3, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings,
                           ImVec2(0, ImGui::GetContentRegionAvail().y))) {
         ImGui::TableSetupColumn("left", ImGuiTableColumnFlags_WidthFixed, left);
@@ -276,6 +349,7 @@ void App::frame() {
         ImGui::BeginChild("##leftcol", ImVec2(0, 0), ImGuiChildFlags_None);
         drawControllerPanel();
         if (mode_ == Mode::Demo) drawScenarios();
+        else drawLiveSelfTest();
         ImGui::EndChild();
 
         ImGui::TableSetColumnIndex(1);
@@ -287,64 +361,113 @@ void App::frame() {
         ImGui::TableSetColumnIndex(2);
         ImGui::BeginChild("##rightcol", ImVec2(0, 0), ImGuiChildFlags_None);
         drawSyncSettings();
+        drawConfigFile();
         drawDiagnostics();
-        drawLivePanel();
         ImGui::EndChild();
         ImGui::EndTable();
     }
     ImGui::End();
+    drawSetupWindow();
+    drawErrorPopup();
 }
 
 void App::drawTopBar() {
-    ImGui::PushFont(nullptr);
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("gsmacro");
     ImGui::SameLine();
-    ImGui::TextDisabled("GameSir Tarantula  3537:103D  |  low-latency controller macros");
-    ImGui::PopFont();
+    ImGui::TextDisabled("GameSir Tarantula 3537:103D  -  controller-native macros");
 
-    ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - 520 * scale_);
-    // Mode badge.
-    {
-        const char* label = mode_ == Mode::Demo ? " DEMO MODE  (mock controller, no virtual device) " : " LIVE  (UNTESTED ON HARDWARE) ";
-        ImVec2 sz = ImGui::CalcTextSize(label);
-        ImVec2 p = ImGui::GetCursorScreenPos();
-        ImU32 col = mode_ == Mode::Demo ? IM_COL32(76, 154, 255, 60) : IM_COL32(255, 92, 92, 70);
-        ImU32 edge = mode_ == Mode::Demo ? kPhys : kBlocked;
-        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x, p.y - 2), ImVec2(p.x + sz.x, p.y + sz.y + 2), col, 4 * scale_);
-        ImGui::GetWindowDrawList()->AddRect(ImVec2(p.x, p.y - 2), ImVec2(p.x + sz.x, p.y + sz.y + 2), edge, 4 * scale_);
-        ImGui::TextUnformatted(label);
+    // Right-aligned controls.
+    const float w = 640 * scale_;
+    ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 10, ImGui::GetWindowContentRegionMax().x - w));
+    auto segment = [&](const char* label, bool active) {
+        if (active) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.298f, 0.604f, 1.0f, 0.75f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.298f, 0.604f, 1.0f, 0.85f));
+        }
+        bool clicked = ImGui::Button(label);
+        if (active) ImGui::PopStyleColor(2);
+        return clicked && !active;
+    };
+    if (segment(" Demo ", mode_ == Mode::Demo)) startDemo();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mock controller, no virtual device. Safe to explore.");
+    ImGui::SameLine(0, 2);
+    if (segment(" Live ", mode_ == Mode::Live)) showSetup(true);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Real controller -> virtual Xbox 360 pad. Opens the guided setup first.");
+    ImGui::SameLine(0, 14 * scale_);
+
+    // Armed pill.
+    bool armed = cfg_.settings.macrosArmed;
+    ImGui::PushStyleColor(ImGuiCol_Button, armed ? ImVec4(1.0f, 0.62f, 0.26f, 0.85f) : ImVec4(0.25f, 0.28f, 0.33f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, armed ? ImVec4(1.0f, 0.70f, 0.38f, 0.95f) : ImVec4(0.32f, 0.36f, 0.42f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Text, armed ? ImVec4(0.08f, 0.09f, 0.11f, 1) : ImVec4(0.9f, 0.91f, 0.94f, 1));
+    if (ImGui::Button(armed ? " MACROS ARMED " : " MACROS OFF ")) {
+        if (!armed && mode_ == Mode::Live && !confirmedPassthrough_) ImGui::OpenPopup("arm?");
+        else { cfg_.settings.macrosArmed = !armed; applyConfig(); }
     }
+    ImGui::PopStyleColor(3);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip(armed ? "L1/R1 + Square run macros. Click to switch to pure passthrough."
+                                : "Pure passthrough: Square always reaches the game. Click to arm the chord macros.");
+    if (ImGui::BeginPopup("arm?")) {
+        ImGui::TextUnformatted("You have not confirmed that passthrough works yet (Setup, step 4).");
+        if (ImGui::Button("Arm anyway")) { cfg_.settings.macrosArmed = true; applyConfig(); ImGui::CloseCurrentPopup(); }
+        ImGui::SameLine();
+        if (ImGui::Button("Open setup")) { showSetup(true); ImGui::CloseCurrentPopup(); }
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine(0, 14 * scale_);
+    if (ImGui::Button("Setup...")) showSetup(true);
     ImGui::SameLine();
     if (ImGui::Button("Cancel macros")) engine_->cancelMacros();
-    ImGui::SameLine();
-    if (mode_ == Mode::Live && ImGui::Button("Stop live -> Demo")) startDemo();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Stop the running macro, clear the queue and release everything the macros hold.");
+}
 
-    // Status strip.
+void App::drawStatusStrip() {
     ImGui::Separator();
-    auto chip = [&](const char* label, ImU32 dot) {
+    auto chip = [&](const char* label, ImU32 dot, const char* tip) {
         ImVec2 p = ImGui::GetCursorScreenPos();
         float r = 4 * scale_, h = ImGui::GetTextLineHeight();
         ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + r, p.y + h * 0.5f), r, dot);
         ImGui::Dummy(ImVec2(r * 2.5f, h));
         ImGui::SameLine(0, 2 * scale_);
         ImGui::TextUnformatted(label);
+        if (tip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tip);
         ImGui::SameLine(0, 18 * scale_);
     };
-    chip(snap_.running ? "Engine running" : "Engine stopped", snap_.running ? kOk : kBlocked);
-    std::string in = "Input: " + (snap_.inputName.empty() ? std::string("-") : snap_.inputName) +
-                     (snap_.input.connected ? "  (connected)" : "  (disconnected)");
-    chip(in.c_str(), snap_.input.connected ? kOk : kWarn);
-    std::string out = "Output: " + (snap_.outputName.empty() ? std::string("-") : snap_.outputName);
-    chip(out.c_str(), mode_ == Mode::Live ? kMacro : kDim);
-    char q[96];
+    auto stateCol = [](CheckResult::State s) {
+        return s == CheckResult::Ok ? kOk : s == CheckResult::Warn ? kWarn : s == CheckResult::Fail ? kBlocked : kDim;
+    };
+    char b[160];
+    chip(snap_.running ? "Engine running" : "Engine stopped", snap_.running ? kOk : kBlocked, nullptr);
+    if (mode_ == Mode::Demo) {
+        chip("Controller: mock (Demo)", kPhys, "Demo Mode uses a simulated controller.");
+        chip("Virtual pad: none", kDim, "Demo Mode never creates a virtual device.");
+    } else {
+        chip(snap_.input.connected ? "GameSir connected" : "GameSir NOT found - check cable / PC mode", snap_.input.connected ? kOk : kBlocked,
+             "Physical controller read through XInput (VID 3537).");
+        if (virtualSlot_ >= 0) snprintf(b, sizeof b, "Virtual Xbox 360 pad: XInput slot %d", virtualSlot_ + 1);
+        else snprintf(b, sizeof b, "Virtual Xbox 360 pad: created (slot pending)");
+        chip(b, snap_.submitFailures ? kBlocked : kOk, "Created through ViGEmBus. Removed when Live Mode stops or gsmacro closes.");
+    }
+    if (liveBackendsAvailable()) {
+        chip("ViGEmBus", stateCol(chkViGEm_.state), chkViGEm_.text.empty() ? "Not checked yet - open Setup." : chkViGEm_.text.c_str());
+        chip("HidHide", stateCol(chkHidHide_.state), chkHidHide_.text.empty() ? "Not checked yet - open Setup." : chkHidHide_.text.c_str());
+    }
     if (snap_.currentMacro >= 0)
-        snprintf(q, sizeof q, "Running: %s macro  |  queued %d", snap_.currentMacro == 0 ? "left" : "right", snap_.queued);
+        snprintf(b, sizeof b, "Running: %s macro  |  queued %d", snap_.currentMacro == 0 ? "left" : "right", snap_.queued);
     else
-        snprintf(q, sizeof q, "Idle  |  queued %d", snap_.queued);
-    chip(q, snap_.currentMacro >= 0 ? macroColor(snap_.currentMacro, 255) : kFaint);
+        snprintf(b, sizeof b, "Idle  |  queued %d", snap_.queued);
+    chip(b, snap_.currentMacro >= 0 ? macroColor(snap_.currentMacro, 255) : kFaint, nullptr);
     ImGui::NewLine();
-    if (!engineError_.empty()) ImGui::TextColored(kErrV, "%s", engineError_.c_str());
+    if (mode_ == Mode::Live && snap_.submitFailures)
+        ImGui::TextColored(kErrV, "Virtual pad updates are failing (%llu). ViGEmBus may have stopped: click Demo, then run Setup checks.",
+                           (unsigned long long)snap_.submitFailures);
+    if (mode_ == Mode::Live && !cfg_.settings.macrosArmed)
+        ImGui::TextColored(kWarnV, "Live Mode: macros are OFF (pure passthrough) until you confirm normal input works - see Setup step 7.");
+    ImGui::Spacing();
 }
+
 
 // ───────────────────────── controller drawing ─────────────────────────
 
@@ -506,8 +629,9 @@ void App::drawPad(const char* id, const GamepadState& s, bool interactive, bool 
     ImGui::PopID();
 }
 
+
 void App::drawControllerPanel() {
-    sectionTitle(mode_ == Mode::Demo ? "PHYSICAL INPUT  (mock - click / drag to play)" : "PHYSICAL INPUT");
+    sectionTitle(mode_ == Mode::Demo ? "PHYSICAL INPUT  (mock - click / drag to play)" : "PHYSICAL INPUT  (GameSir via XInput)");
     drawPad("in", snap_.input.state, mode_ == Mode::Demo && !player_.playing(), false);
     if (mode_ == Mode::Demo) {
         ImGui::TextDisabled("L1/R1/L2/R2 latch on click; buttons press while held.");
@@ -515,6 +639,8 @@ void App::drawControllerPanel() {
             ImGui::SameLine();
             if (ImGui::SmallButton("Release latches")) { latched_ = 0; manual_.lt = manual_.rt = 0; }
         }
+    } else if (!snap_.input.connected) {
+        ImGui::TextColored(kErrV, "Controller not found. The output is held neutral; gsmacro rescans every second.");
     }
     ImGui::Spacing();
     sectionTitle("VIRTUAL OUTPUT  (what the game would see)");
@@ -534,6 +660,33 @@ void App::drawControllerPanel() {
     legend(kBlocked, "withheld");
     ImGui::NewLine();
 }
+
+void App::drawLiveSelfTest() {
+    ImGui::Spacing();
+    sectionTitle("LIVE SELF-TEST");
+    ImGui::PushTextWrapPos(0);
+    if (virtualSlot_ < 0) {
+        ImGui::TextColored(kWarnV, "Waiting for Windows to assign the virtual pad an XInput slot...");
+    } else if (!readbackOk_) {
+        ImGui::TextColored(kErrV, "Virtual pad (slot %d) can't be read back through XInput.", virtualSlot_ + 1);
+    } else {
+        uint64_t total = selfMatch_ + selfMismatch_;
+        ImGui::Text("Virtual pad read back from XInput slot %d.", virtualSlot_ + 1);
+        if (total < 60) ImGui::TextDisabled("Move the sticks and press buttons to collect samples (%llu so far).", (unsigned long long)total);
+        else {
+            double pct = 100.0 * (double)selfMatch_ / (double)total;
+            ImGui::TextColored(pct > 99.0 ? kOkV : kWarnV, "Readback equals engine output in %.1f %% of %llu stable samples.", pct,
+                               (unsigned long long)total);
+        }
+        ImGui::TextDisabled("This only proves the virtual pad mirrors gsmacro's output. Check the game sees exactly one controller "
+                            "(Setup step 6) before playing.");
+    }
+    ImGui::PopTextWrapPos();
+    if (ImGui::Button("Reset self-test")) selfMatch_ = selfMismatch_ = 0;
+    ImGui::SameLine();
+    if (ImGui::Button("Open joy.cpl")) openGameControllersPanel();
+}
+
 
 void App::drawScenarios() {
     ImGui::Spacing();
@@ -560,6 +713,7 @@ void App::drawScenarios() {
     }
 }
 
+
 // ───────────────────────── macro editor ─────────────────────────
 
 void App::drawMacroEditor() {
@@ -569,6 +723,8 @@ void App::drawMacroEditor() {
         for (int side = 0; side < 2; side++) {
             ImGuiTabItemFlags f = requestTab_ == side ? ImGuiTabItemFlags_SetSelected : 0;
             if (ImGui::BeginTabItem(tabs[side], nullptr, f)) {
+                drawMacroHeader(side);
+                if (!textMode_[side]) drawMacroVisual(side);
                 drawMacroSteps(side);
                 ImGui::EndTabItem();
             }
@@ -578,26 +734,193 @@ void App::drawMacroEditor() {
     }
 }
 
-void App::drawMacroSteps(int side) {
+void App::drawMacroHeader(int side) {
     Macro& m = cfg_.macros[side];
     bool& enabled = side == 0 ? cfg_.settings.leftEnabled : cfg_.settings.rightEnabled;
     bool changed = false;
     ImGui::PushID(side);
-
     changed |= ImGui::Checkbox("Enabled", &enabled);
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(260 * scale_);
-    changed |= inputText("Name", &m.name);
+    ImGui::SetNextItemWidth(230 * scale_);
+    changed |= inputText("##name", &m.name);
     ImGui::SameLine();
-    if (ImGui::Checkbox("Edit as text", &textMode_[side]) && textMode_[side]) {
-        textBuf_[side] = macroToText(m);
-        textErr_[side].clear();
+    if (ImGui::Button("Test")) {
+        if (!snap_.input.connected)
+            showError("Test needs a connected controller", "No controller is connected, and gsmacro cancels every macro while the "
+                      "controller is missing (so nothing can stay pressed).", "Connect the GameSir (or switch to Demo Mode) and try again.");
+        else engine_->triggerMacro(side);
     }
-
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip(mode_ == Mode::Live ? "Runs the macro now on the VIRTUAL pad (through the FIFO). Keep the game unfocused."
+                                              : "Runs the macro now through the FIFO and shows the result.");
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Edit as text", &textMode_[side])) setTextMode(side, textMode_[side]);
+    ImGui::SameLine();
+    if (ImGui::Button("Import...")) {
+        std::string p = ioPath_;
+        if (choosePath(false, &p)) {
+            std::ifstream f(p, std::ios::binary);
+            std::stringstream ss;
+            ss << f.rdbuf();
+            Macro parsed;
+            parsed.name = m.name;
+            std::string err;
+            if (!f) showError("Import failed", "Cannot read " + p, "Check the path and try again.");
+            else if (!macroFromText(ss.str(), &parsed, &err))
+                showError("Import failed", err, "The macro was not changed. A macro file has one action per line, e.g. 'press Cross', 'wait 16.7'.");
+            else { m.actions = parsed.actions; changed = true; setStatus("Imported macro from " + p, false); }
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Export...")) {
+        std::string p = ioPath_;
+        if (choosePath(true, &p)) {
+            std::ofstream f(p, std::ios::binary | std::ios::trunc);
+            f << "# gsmacro macro: " << m.name << "\n" << macroToText(m);
+            if (f) setStatus("Exported macro to " + p, false);
+            else showError("Export failed", "Cannot write " + p, "Choose a folder you can write to (e.g. Documents).");
+        }
+    }
     double tickMs = 1000.0 / cfg_.settings.gameTickHz;
     double total = 0;
     for (auto& a : m.actions) if (a.op == Op::Wait) total += std::max(0.0, a.ms);
-    ImGui::TextDisabled("Total %.2f ms  =  %.2f game ticks at %.0f Hz  |  %zu steps", total, total / tickMs, cfg_.settings.gameTickHz, m.actions.size());
+    ImGui::TextDisabled("Total %.2f ms  =  %.2f game ticks at %.0f Hz  |  %zu steps", total, total / tickMs, cfg_.settings.gameTickHz,
+                        m.actions.size());
+    if (changed) applyConfig();
+    ImGui::PopID();
+}
+
+// A compact visual of the macro: one row per button/axis it touches, with a
+// draggable handle at the end of every wait.
+void App::drawMacroVisual(int side) {
+    Macro& m = cfg_.macros[side];
+    struct Seg { double t0, t1; uint16_t on, off; uint8_t axMask; double ax[AXIS_COUNT]; };
+    std::vector<Seg> segs;
+    std::vector<std::pair<int, double>> handles;  // (action index, boundary time)
+    uint16_t on = 0, off = 0, usedB = 0;
+    uint8_t axMask = 0, usedA = 0;
+    double ax[AXIS_COUNT] = {};
+    double t = 0;
+    for (size_t i = 0; i < m.actions.size(); i++) {
+        const Action& a = m.actions[i];
+        switch (a.op) {
+        case Op::Press: on |= a.buttons; off &= (uint16_t)~a.buttons; usedB |= a.buttons; break;
+        case Op::Release: on &= (uint16_t)~a.buttons; off &= (uint16_t)~a.buttons; usedB |= a.buttons; break;
+        case Op::Suppress: off |= a.buttons; on &= (uint16_t)~a.buttons; usedB |= a.buttons; break;
+        case Op::SetAxis: axMask |= (uint8_t)(1u << a.axis); ax[a.axis] = a.value; usedA |= (uint8_t)(1u << a.axis); break;
+        case Op::ReleaseAxis: axMask &= (uint8_t)~(1u << a.axis); usedA |= (uint8_t)(1u << a.axis); break;
+        case Op::ReleaseAll: on = off = 0; axMask = 0; break;
+        case Op::Wait: {
+            double d = std::max(0.0, a.ms);
+            Seg s{t, t + d, on, off, axMask, {}};
+            std::copy(ax, ax + AXIS_COUNT, s.ax);
+            segs.push_back(s);
+            t += d;
+            handles.push_back({(int)i, t});
+            break;
+        }
+        }
+    }
+    std::vector<std::pair<std::string, int>> rows;  // label, bit (>=0 button) or -(axis+1)
+    for (uint16_t b : kAllButtons) if (usedB & b) rows.push_back({buttonName(b), b});
+    for (int a = 0; a < AXIS_COUNT; a++) if (usedA & (1u << a)) rows.push_back({axisName((Axis)a), -(a + 1)});
+    if (rows.empty() || t <= 0) {
+        ImGui::TextDisabled("Add steps with waits to see the macro timeline here.");
+        return;
+    }
+    const double tickMs = 1000.0 / cfg_.settings.gameTickHz;
+    const bool dragging = dragSide_ == side && dragAction_ >= 0;
+    const double D = dragging ? std::max(dragTotalMs_, t) : t;
+    const float rowH = 20 * scale_, labelW = 72 * scale_;
+    const float w = ImGui::GetContentRegionAvail().x, h = rows.size() * rowH + 16 * scale_;
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float x0 = p0.x + labelW, x1 = p0.x + w - 6 * scale_;
+    auto X = [&](double tm) { return x0 + (float)(tm / D) * (x1 - x0); };
+    dl->AddRectFilled(ImVec2(x0, p0.y), ImVec2(x1, p0.y + h), IM_COL32(18, 21, 27, 255), 4);
+    for (double g = 0; g <= D; g += tickMs) dl->AddLine(ImVec2(X(g), p0.y), ImVec2(X(g), p0.y + h - 14 * scale_), IM_COL32(255, 255, 255, 14));
+    for (size_t r = 0; r < rows.size(); r++) {
+        float y = p0.y + 2 * scale_ + r * rowH;
+        dl->AddText(nullptr, ImGui::GetFontSize() * 0.85f, ImVec2(p0.x, y), kDim, rows[r].first.c_str());
+        bool prevHad = false;
+        double prevVal = 0;
+        for (auto& s : segs) {
+            float a = X(s.t0), b = std::max(X(s.t1), X(s.t0) + 1);
+            int bit = rows[r].second;
+            if (bit >= 0) {
+                if (s.on & bit) dl->AddRectFilled(ImVec2(a, y + 2), ImVec2(b, y + rowH - 2), macroColor(side, 230), 2);
+                else if (s.off & bit) dl->AddRect(ImVec2(a, y + 2), ImVec2(b, y + rowH - 2), kBlocked, 2);
+            } else {
+                int axn = -bit - 1;
+                if (s.axMask & (1u << axn)) {
+                    // Bar height shows the value (centre line = 0; triggers grow upward).
+                    float mid = y + rowH / 2, hh = (float)(s.ax[axn] * (rowH / 2 - 2));
+                    dl->AddRectFilled(ImVec2(a, std::min(mid, mid - hh) - 1), ImVec2(b, std::max(mid, mid - hh) + 1), macroColor(side, 200));
+                    // Label the value once per run of equal values.
+                    if (!prevHad || prevVal != s.ax[axn]) {
+                        char vb[16];
+                        snprintf(vb, sizeof vb, "%+.2f", s.ax[axn]);
+                        float fs = ImGui::GetFontSize() * 0.75f;
+                        dl->AddText(nullptr, fs, ImVec2(a + 3, y + 1), kText, vb);
+                    }
+                    prevHad = true;
+                    prevVal = s.ax[axn];
+                } else {
+                    prevHad = false;
+                }
+            }
+        }
+    }
+    // Playhead while this macro runs.
+    if (snap_.currentMacro == side) {
+        double el = toMs(snap_.now - snap_.runStart);
+        if (el >= 0 && el <= D) dl->AddLine(ImVec2(X(el), p0.y), ImVec2(X(el), p0.y + h), kText, 1.5f * scale_);
+    }
+    // Draggable wait boundaries.
+    bool changed = false;
+    float handleTop = p0.y, handleH = h - 14 * scale_;
+    for (size_t k = 0; k < handles.size(); k++) {
+        int ai = handles[k].first;
+        float hx = X(handles[k].second);
+        ImGui::PushID(ai);
+        ImGui::SetCursorScreenPos(ImVec2(hx - 4 * scale_, handleTop));
+        ImGui::InvisibleButton("##h", ImVec2(8 * scale_, handleH));
+        bool active = ImGui::IsItemActive(), hovered = ImGui::IsItemHovered();
+        if (ImGui::IsItemActivated()) {
+            dragSide_ = side; dragAction_ = ai; dragStartMs_ = m.actions[ai].ms; dragTotalMs_ = D; dragMouseX_ = ImGui::GetIO().MousePos.x;
+        }
+        if (active && dragSide_ == side && dragAction_ == ai) {
+            double delta = (ImGui::GetIO().MousePos.x - dragMouseX_) / (x1 - x0) * dragTotalMs_;
+            double v = std::max(0.0, dragStartMs_ + delta);
+            v = ImGui::GetIO().KeyShift ? std::round(v / tickMs) * tickMs : std::round(v * 10.0) / 10.0;
+            if (std::fabs(v - m.actions[ai].ms) > 1e-9) { m.actions[ai].ms = v; changed = true; }
+            ImGui::SetTooltip("wait = %.2f ms  (%.2f ticks)   Shift = snap to game ticks", m.actions[ai].ms, m.actions[ai].ms / tickMs);
+        } else if (hovered) {
+            ImGui::SetTooltip("Step %d: wait %.2f ms (%.2f ticks)\nDrag to change. Hold Shift to snap to %.0f Hz game ticks.", ai + 1,
+                              m.actions[ai].ms, m.actions[ai].ms / tickMs, cfg_.settings.gameTickHz);
+        }
+        if (ImGui::IsItemDeactivated() && dragSide_ == side) { dragSide_ = -1; dragAction_ = -1; }
+        ImU32 col = active ? kText : hovered ? kPhys : IM_COL32(150, 160, 178, 140);
+        dl->AddLine(ImVec2(hx, handleTop), ImVec2(hx, handleTop + handleH), col, (active || hovered ? 2.0f : 1.0f) * scale_);
+        dl->AddTriangleFilled(ImVec2(hx - 4 * scale_, handleTop + handleH), ImVec2(hx + 4 * scale_, handleTop + handleH),
+                              ImVec2(hx, handleTop + handleH - 6 * scale_), col);
+        ImGui::PopID();
+    }
+    char lbl[32];
+    snprintf(lbl, sizeof lbl, "%.1f ms", t);
+    dl->AddText(nullptr, ImGui::GetFontSize() * 0.8f, ImVec2(x1 - ImGui::CalcTextSize(lbl).x * 0.8f, p0.y + h - 13 * scale_), kDim, lbl);
+    dl->AddText(nullptr, ImGui::GetFontSize() * 0.8f, ImVec2(x0 + 2, p0.y + h - 13 * scale_), kDim, "0");
+    ImGui::SetCursorScreenPos(p0);
+    ImGui::Dummy(ImVec2(w, h));
+    if (changed) applyConfig();
+}
+
+
+void App::drawMacroSteps(int side) {
+    Macro& m = cfg_.macros[side];
+    bool changed = false;
+    ImGui::PushID(side);
+    double tickMs = 1000.0 / cfg_.settings.gameTickHz;
 
     if (textMode_[side]) {
         ImGui::TextDisabled("press / release / suppress <Btn+Btn>, axis <LX|LY|RX|RY|L2|R2> <value>, axis-release <axis>, release-all, wait <ms>");
@@ -730,6 +1053,7 @@ void App::drawMacroSteps(int side) {
     ImGui::PopID();
 }
 
+
 // ───────────────────────── timeline ─────────────────────────
 
 void App::drawTimeline() {
@@ -834,33 +1158,40 @@ void App::drawTimeline() {
     ImGui::TextDisabled("Blue = passthrough, orange = macro-driven, grey line = physical stick. Shaded = macro running.");
 }
 
+
 // ───────────────────────── settings ─────────────────────────
 
 void App::drawSyncSettings() {
-    sectionTitle("SYNCHRONIZATION");
+    sectionTitle("FIFO / SYNCHRONIZATION");
     Settings& s = cfg_.settings;
     bool c = false;
     ImGui::PushItemWidth(150 * scale_);
-    float v = (float)s.pollPeriodUs;
-    if (ImGui::DragFloat("Input poll period", &v, 10, 100, 16000, "%.0f us")) { s.pollPeriodUs = v; c = true; }
-    helpMarker("Used by polled sources (XInput). Event-driven sources wake the engine directly. Average sampling delay is half this period.");
-    v = (float)s.spinTailUs;
-    if (ImGui::DragFloat("Spin tail", &v, 5, 0, 2000, "%.0f us")) { s.spinTailUs = v; c = true; }
-    helpMarker("The last part of each wait is spun instead of slept, for precise macro timing. 0 = lowest CPU, timing limited by the OS timer.");
+    float v = (float)s.interMacroGapMs;
+    if (ImGui::DragFloat("Gap between macros", &v, 0.1f, 0, 200, "%.2f ms")) { s.interMacroGapMs = std::max(0.0f, v); c = true; }
+    helpMarker("Neutral time between two queued macros. 0 is allowed: gsmacro still emits one released update between them, "
+               "but Rocket League only samples input every 8.33 ms (120 Hz), so it may not see that release. Keep it at or above "
+               "one game tick if both macros press the same button.");
+    ImGui::TextDisabled("Presets:");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("0 ms")) { s.interMacroGapMs = 0; c = true; }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("1 tick")) { s.interMacroGapMs = 1000.0 / s.gameTickHz; c = true; }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("10 ms")) { s.interMacroGapMs = 10; c = true; }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("2 ticks")) { s.interMacroGapMs = 2000.0 / s.gameTickHz; c = true; }
+    if (s.interMacroGapMs < 1000.0 / s.gameTickHz)
+        ImGui::TextColored(kWarnV, s.interMacroGapMs == 0 ? "0 ms: back to back. The game may merge consecutive presses."
+                                                         : "Gap is shorter than one game tick (%.2f ms).", 1000.0 / s.gameTickHz);
     int qc = s.queueCapacity;
     if (ImGui::SliderInt("FIFO queue", &qc, 0, MacroScheduler::kMaxQueue)) { s.queueCapacity = qc; c = true; }
-    helpMarker("Activations allowed to wait behind the running macro. Extra presses are dropped (counted in Diagnostics).");
-    v = (float)s.interMacroGapMs;
-    if (ImGui::DragFloat("Gap between macros", &v, 0.1f, 0, 200, "%.2f ms")) { s.interMacroGapMs = v; c = true; }
-    helpMarker("Neutral time between queued macros so the game sees buttons released. Keep it above one game tick (8.33 ms at 120 Hz).");
-    if (s.interMacroGapMs < 1000.0 / s.gameTickHz) {
-        ImGui::TextColored(kWarnV, "Gap is shorter than one game tick (%.2f ms).", 1000.0 / s.gameTickHz);
-    }
+    helpMarker("Activations allowed to wait behind the running macro (0 = presses during a macro are ignored). Extra presses are "
+               "dropped and counted in Diagnostics. Macros never overlap.");
     int bb = (int)s.bothBumpers;
     const char* bbNames[] = {"latest pressed", "always left", "always right", "no macro"};
     if (ImGui::Combo("L1+R1+Square", &bb, bbNames, 4)) { s.bothBumpers = (BothBumpers)bb; c = true; }
+    helpMarker("Which macro runs when both bumpers are held. 'latest pressed' = the bumper pressed most recently (left on a tie).");
 
-    // Chord buttons.
     auto buttonCombo = [&](const char* label, uint16_t* bit) {
         int idx = 0;
         for (int i = 0; i < 15; i++) if (kAllButtons[i] == *bit) idx = i;
@@ -878,32 +1209,87 @@ void App::drawSyncSettings() {
     buttonCombo("Chord button", &s.chordButton);
     buttonCombo("Left modifier", &s.leftModifier);
     buttonCombo("Right modifier", &s.rightModifier);
-    v = (float)s.gameTickHz;
-    if (ImGui::DragFloat("Game tick rate", &v, 1, 10, 1000, "%.0f Hz")) { s.gameTickHz = v; c = true; }
-    helpMarker("Display only: draws the timeline grid and converts waits to ticks. Rocket League's physics runs at 120 Hz.");
+    if (ImGui::TreeNode("Timing (advanced)")) {
+        v = (float)s.pollPeriodUs;
+        if (ImGui::DragFloat("Input poll period", &v, 10, 100, 16000, "%.0f us")) { s.pollPeriodUs = v; c = true; }
+        helpMarker("How often the controller is read (XInput is polled). Average sampling delay is half this period. Lower = more CPU.");
+        v = (float)s.spinTailUs;
+        if (ImGui::DragFloat("Spin tail", &v, 5, 0, 2000, "%.0f us")) { s.spinTailUs = v; c = true; }
+        helpMarker("The last part of the wait before each macro step is spun for precision. Only used while a macro runs.");
+        v = (float)s.gameTickHz;
+        if (ImGui::DragFloat("Game tick rate", &v, 1, 10, 1000, "%.0f Hz")) { s.gameTickHz = v; c = true; }
+        helpMarker("Display only: timeline grids and tick counts. Rocket League's physics runs at 120 Hz.");
+        ImGui::TreePop();
+    }
     ImGui::PopItemWidth();
     if (c) applyConfig();
+}
 
+void App::drawConfigFile() {
     ImGui::Spacing();
+    sectionTitle("CONFIGURATION");
+    ImGui::TextDisabled("Saved configuration (loaded at start):");
     ImGui::SetNextItemWidth(-1);
     inputText("##path", &cfgPath_);
     if (ImGui::Button("Save")) {
         std::string err;
-        fileStatus_ = saveConfigFile(cfgPath_, cfg_, &err) ? "Saved " + cfgPath_ : "Save failed: " + err;
+        if (saveConfigFile(cfgPath_, cfg_, &err)) setStatus("Saved " + cfgPath_, false);
+        else showError("Save failed", err, "Check that the folder exists and is writable.");
     }
     ImGui::SameLine();
-    if (ImGui::Button("Load")) {
+    if (ImGui::Button("Reload")) {
         Config c2;
         std::string err;
-        if (loadConfigFile(cfgPath_, &c2, &err)) { cfg_ = c2; applyConfig(); fileStatus_ = "Loaded " + cfgPath_; }
-        else fileStatus_ = "Load failed: " + err;
+        if (loadConfigFile(cfgPath_, &c2, &err)) { cfg_ = c2; applyConfig(); setStatus("Loaded " + cfgPath_, false); }
+        else showError("Load failed", err, "Your current settings were not changed.");
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reset templates")) { cfg_ = defaultConfig(); applyConfig(); fileStatus_ = "Reset to built-in templates (not saved)"; }
+    if (ImGui::Button("Import...")) {
+        std::string p = ioPath_;
+        if (choosePath(false, &p)) {
+            Config c2;
+            std::string err;
+            if (loadConfigFile(p, &c2, &err)) { cfg_ = c2; applyConfig(); setStatus("Imported " + p + " (not saved yet)", false); }
+            else showError("Import failed", err, "Your current settings were not changed. The message names the line to fix.");
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Export...")) {
+        std::string p = ioPath_;
+        if (choosePath(true, &p)) {
+            std::string err;
+            if (saveConfigFile(p, cfg_, &err)) setStatus("Exported to " + p, false);
+            else showError("Export failed", err, "Choose a folder you can write to.");
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Examples")) ImGui::OpenPopup("reset?");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Replace both macros and all settings with the built-in examples.");
+    if (ImGui::BeginPopup("reset?")) {
+        ImGui::TextUnformatted("Replace the current macros and settings with the built-in examples?");
+        if (ImGui::Button("Replace")) {
+            bool armed = cfg_.settings.macrosArmed;
+            cfg_ = defaultConfig();
+            if (mode_ == Mode::Live) cfg_.settings.macrosArmed = armed;
+            applyConfig();
+            setStatus("Built-in examples loaded (not saved)", false);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Keep mine")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    if (!liveBackendsAvailable()) {
+        ImGui::TextDisabled("Import / Export path (no file dialog on this host):");
+        ImGui::SetNextItemWidth(-1);
+        inputText("##iopath", &ioPath_);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Import/Export path (this host has no file dialog).");
+    }
     ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled("%s", fileStatus_.c_str());
+    ImGui::TextColored(fileStatusError_ ? kErrV : kDimV, "%s", fileStatus_.c_str());
     ImGui::PopTextWrapPos();
 }
+
 
 void App::drawDiagnostics() {
     ImGui::Spacing();
@@ -950,46 +1336,204 @@ void App::drawDiagnostics() {
         };
         hrow("Cycle cost", snap_.cycleCost, "Read input + chord + scheduler + merge + submit, per engine wake.");
         hrow("Submit", snap_.submitCost, "Time inside the output sink's submit (mock: a mutex + copy; live: vigem_target_x360_update).");
-        hrow("Timer wake err", snap_.wakeError, "How late the engine woke after a timed deadline (OS timer + spin tail).");
+        hrow("Wake / poll err", snap_.wakeError, "How late the engine woke after a timed deadline - input polls and macro steps (OS timer + spin tail).");
         hrow("Macro step late", snap_.eventLateness, "How late each timed macro event was applied vs its schedule.");
         hrow("Queued start late", snap_.startLateness, "How late a queued macro started vs its earliest allowed start.");
         ImGui::EndTable();
     }
     const auto& sc = snap_.sched;
     const auto& ch = snap_.chords;
-    ImGui::TextDisabled("Chords  L %llu  R %llu  | Square alone %llu  | disabled %llu", (unsigned long long)ch.left,
-                        (unsigned long long)ch.right, (unsigned long long)ch.passthrough, (unsigned long long)ch.disabled);
+    ImGui::TextDisabled("Chords  L %llu  R %llu  |  Square alone %llu", (unsigned long long)ch.left, (unsigned long long)ch.right,
+                        (unsigned long long)ch.passthrough);
+    ImGui::TextDisabled("Not run: macro off %llu, disarmed %llu  |  Test %llu", (unsigned long long)ch.disabled,
+                        (unsigned long long)ch.disarmed, (unsigned long long)ch.manual);
+    // Live FIFO view.
+    ImGui::TextDisabled("Queue:");
+    ImGui::SameLine();
+    if (snap_.currentMacro >= 0) {
+        ImGui::TextColored(snap_.currentMacro == 0 ? ImVec4(1, 0.62f, 0.26f, 1) : ImVec4(0.73f, 0.41f, 1, 1), "[%s running]",
+                           snap_.currentMacro == 0 ? "L" : "R");
+        ImGui::SameLine();
+    }
+    for (int i = 0; i < snap_.queued; i++) {
+        ImGui::TextColored(snap_.queueIds[i] == 0 ? ImVec4(1, 0.62f, 0.26f, 0.7f) : ImVec4(0.73f, 0.41f, 1, 0.7f), "[%s]",
+                           snap_.queueIds[i] == 0 ? "L" : "R");
+        ImGui::SameLine();
+    }
+    if (snap_.currentMacro < 0 && !snap_.queued) ImGui::TextDisabled("empty");
+    else ImGui::NewLine();
     ImGui::TextDisabled("Macros  started %llu  done %llu  dropped %llu  cancelled %llu", (unsigned long long)sc.started,
                         (unsigned long long)sc.completed, (unsigned long long)sc.dropped, (unsigned long long)sc.cancelled);
     if (snap_.submitFailures) ImGui::TextColored(kErrV, "Submit failures: %llu", (unsigned long long)snap_.submitFailures);
     if (ImGui::Button("Reset statistics")) engine_->resetStats();
 }
 
-void App::drawLivePanel() {
-    ImGui::Spacing();
-    sectionTitle("LIVE MODE  (WINDOWS, UNTESTED)");
+
+// ───────────────────────── setup wizard ─────────────────────────
+
+void App::drawSetupWindow() {
+    if (!setupOpen_) return;
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowSize(ImVec2(780 * scale_, std::min(vp->WorkSize.y - 40 * scale_, 820 * scale_)), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.10f, 0.115f, 0.14f, 1));
+    if (!ImGui::Begin("Setup & validation - Live Mode###setup", &setupOpen_, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::End();
+        ImGui::PopStyleColor();
+        return;
+    }
     ImGui::PushTextWrapPos(0);
-    if (!liveBackendsAvailable()) {
-        ImGui::TextColored(kDimV, "Not available in this build. Live mode (XInput input + ViGEmBus virtual Xbox 360 pad) is compiled only for Windows.");
-        ImGui::PopTextWrapPos();
-        return;
+    ImGui::TextColored(kDimV, "Each step only reads system state unless you press its button. gsmacro never installs drivers or "
+                              "changes HidHide, reWASD or GameSir Connect. Unapply your reWASD config before starting.");
+    if (ImGui::Button("Re-run checks")) runChecks();
+    ImGui::Separator();
+
+    auto stepHeader = [&](int n, const char* title, CheckResult::State st) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float r = ImGui::GetTextLineHeight() * 0.62f;
+        ImU32 col = st == CheckResult::Ok ? kOk : st == CheckResult::Warn ? kWarn : st == CheckResult::Fail ? kBlocked : kFaint;
+        ImVec2 c(p.x + r, p.y + ImGui::GetTextLineHeight() * 0.5f);
+        dl->AddCircleFilled(c, r, col);
+        char num[4];
+        snprintf(num, sizeof num, "%d", n);
+        ImVec2 ts = ImGui::CalcTextSize(num);
+        dl->AddText(ImVec2(c.x - ts.x / 2, c.y - ts.y / 2), IM_COL32(15, 18, 24, 255), num);
+        ImGui::Dummy(ImVec2(r * 2 + 6 * scale_, ImGui::GetTextLineHeight()));
+        ImGui::SameLine();
+        ImGui::TextUnformatted(title);
+    };
+    auto showCheck = [&](const CheckResult& r) {
+        ImGui::Indent(26 * scale_);
+        ImVec4 col = r.state == CheckResult::Ok ? kOkV : r.state == CheckResult::Warn ? kWarnV : r.state == CheckResult::Fail ? kErrV : kDimV;
+        ImGui::TextColored(col, "%s", r.text.empty() ? "Not checked yet." : r.text.c_str());
+        if (!r.guidance.empty()) ImGui::TextColored(kDimV, "%s", r.guidance.c_str());
+        ImGui::Unindent(26 * scale_);
+    };
+    const bool live = mode_ == Mode::Live;
+    const bool avail = liveBackendsAvailable();
+
+    stepHeader(1, "GameSir controller detected", chkController_.state);
+    showCheck(chkController_);
+    ImGui::Spacing();
+
+    stepHeader(2, "ViGEmBus driver and ViGEmClient.dll available", chkViGEm_.state);
+    showCheck(chkViGEm_);
+    ImGui::Spacing();
+
+    stepHeader(3, "Create the virtual Xbox 360 controller", live ? CheckResult::Ok : CheckResult::Unknown);
+    ImGui::Indent(26 * scale_);
+    if (live) {
+        if (virtualSlot_ >= 0) ImGui::TextColored(kOkV, "Virtual pad active in XInput slot %d. Macros are %s.", virtualSlot_ + 1,
+                                                  cfg_.settings.macrosArmed ? "ARMED" : "OFF (pure passthrough)");
+        else ImGui::TextColored(kWarnV, "Virtual pad created; waiting for its XInput slot.");
+    } else {
+        bool ready = avail && chkViGEm_.state == CheckResult::Ok;
+        if (!ready) ImGui::BeginDisabled();
+        if (ImGui::Button("Start Live Mode (passthrough only, macros OFF)")) startLive();
+        if (!ready) ImGui::EndDisabled();
+        ImGui::TextColored(kDimV, avail ? "Needs step 2 to pass. Creates one virtual pad; Stop removes it."
+                                        : "Not available on this host (Windows build only).");
     }
-    ImGui::TextColored(kWarnV, "Live mode has NOT been tested with the real controller yet.");
-    ImGui::TextDisabled("HidHide: %s", hidHideText_.c_str());
+    ImGui::Unindent(26 * scale_);
+    ImGui::Spacing();
+
+    uint64_t total = selfMatch_ + selfMismatch_;
+    bool selfOk = live && readbackOk_ && total >= 60 && selfMismatch_ * 100 <= total;
+    stepHeader(4, "Check passthrough outside Rocket League", confirmedPassthrough_ ? CheckResult::Ok : selfOk ? CheckResult::Warn : CheckResult::Unknown);
+    ImGui::Indent(26 * scale_);
+    if (live) {
+        if (total) ImGui::Text("Self-test: virtual pad readback equals gsmacro's output in %llu of %llu stable samples.",
+                               (unsigned long long)selfMatch_, (unsigned long long)total);
+        else ImGui::TextDisabled("Self-test: move sticks and press buttons to collect samples.");
+    }
+    ImGui::TextColored(kDimV, "Open Windows' controller panel and test the 'Controller (XBOX 360 For Windows)' entry: every button, both "
+                              "sticks and both triggers should respond normally, with no stuck inputs.");
+    if (ImGui::Button("Open joy.cpl")) openGameControllersPanel();
+    ImGui::SameLine();
+    if (!live) ImGui::BeginDisabled();
+    ImGui::Checkbox("Normal input works on the virtual pad", &confirmedPassthrough_);
+    if (!live) ImGui::EndDisabled();
+    ImGui::Unindent(26 * scale_);
+    ImGui::Spacing();
+
+    stepHeader(5, "HidHide available", chkHidHide_.state);
+    showCheck(chkHidHide_);
+    ImGui::Spacing();
+
+    stepHeader(6, "Hide the physical controller from games (manual, reversible)", confirmedHidden_ ? CheckResult::Ok : CheckResult::Unknown);
+    ImGui::Indent(26 * scale_);
+    ImGui::TextColored(kDimV,
+        "In HidHide Configuration Client:  (a) Applications tab: add gsmacro.exe from this folder, so gsmacro can still read the "
+        "pad.  (b) Devices tab: tick the GameSir controller entries, then tick 'Enable device hiding'.  (c) In joy.cpl only ONE "
+        "controller should now be listed (the Xbox 360 virtual pad).  To undo at any time: untick the device or 'Enable device "
+        "hiding' in HidHide - it takes effect immediately (replug the pad if a game still misses it).");
+    std::string herr;
+    if (ImGui::Button("Open HidHide Configuration Client")) {
+        if (!openHidHideClient(&herr)) showError("Could not open HidHide", herr, "");
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Games see exactly one controller", &confirmedHidden_);
+    ImGui::Unindent(26 * scale_);
+    ImGui::Spacing();
+
+    stepHeader(7, "Confirm normal input, then arm the macros", cfg_.settings.macrosArmed && live ? CheckResult::Ok : CheckResult::Unknown);
+    ImGui::Indent(26 * scale_);
+    bool canArm = live && confirmedPassthrough_;
+    if (!canArm) ImGui::BeginDisabled();
+    if (!cfg_.settings.macrosArmed) {
+        if (ImGui::Button("Arm macros (L1/R1 + Square)")) { cfg_.settings.macrosArmed = true; applyConfig(); }
+    } else if (ImGui::Button("Disarm macros (pure passthrough)")) {
+        cfg_.settings.macrosArmed = false;
+        applyConfig();
+    }
+    if (!canArm) ImGui::EndDisabled();
+    if (!confirmedHidden_ && canArm) ImGui::TextColored(kWarnV, "Step 6 not confirmed: a game may see both controllers (doubled input).");
+    ImGui::TextColored(kDimV, "Try each macro with the Test button and with L1/R1 + Square while watching the output timeline before "
+                              "using it in a match. The built-in macros are only examples.");
+    ImGui::Unindent(26 * scale_);
+    ImGui::Spacing();
+
+    stepHeader(8, "Turning Live Mode off / restoring normal controller use", CheckResult::Unknown);
+    ImGui::Indent(26 * scale_);
+    ImGui::TextColored(kDimV,
+        "Click Demo (top bar) or Stop below: the virtual pad is removed at once with all inputs released. Closing gsmacro does the "
+        "same. If you hid the GameSir with HidHide, untick it there so games see the physical pad directly again. Nothing else "
+        "on the system was changed.");
+    if (!live) ImGui::BeginDisabled();
+    if (ImGui::Button("Stop Live Mode")) startDemo();
+    if (!live) ImGui::EndDisabled();
+    ImGui::Unindent(26 * scale_);
     ImGui::PopTextWrapPos();
-    if (mode_ == Mode::Live) {
-        ImGui::TextColored(kOkV, "Live output running.");
-        if (ImGui::Button("Stop live output")) startDemo();
-        return;
+    ImGui::End();
+    ImGui::PopStyleColor();
+}
+
+void App::drawErrorPopup() {
+    if (errPending_) {
+        ImGui::OpenPopup("Problem###err");
+        errPending_ = false;
     }
-    ImGui::Checkbox("HidHide hides the GameSir from games", &liveChecks_[0]);
-    ImGui::Checkbox("gsmacro is on HidHide's allowed apps", &liveChecks_[1]);
-    ImGui::Checkbox("reWASD config is unapplied", &liveChecks_[2]);
-    bool ready = liveChecks_[0] && liveChecks_[1] && liveChecks_[2];
-    if (!ready) ImGui::BeginDisabled();
-    if (ImGui::Button("Start live output (creates a virtual Xbox 360 pad)")) startLive();
-    if (!ready) ImGui::EndDisabled();
-    if (ImGui::Button("Refresh HidHide status")) hidHideText_ = hidHideStatusText();
+    ImGui::SetNextWindowSize(ImVec2(560 * scale_, 0), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Problem###err", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextColored(kErrV, "%s", errTitle_.c_str());
+        ImGui::Spacing();
+        ImGui::TextUnformatted(errText_.c_str());
+        if (!errGuidance_.empty()) {
+            ImGui::Spacing();
+            ImGui::TextColored(kDimV, "What to do: %s", errGuidance_.c_str());
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        if (ImGui::Button("OK", ImVec2(100 * scale_, 0))) ImGui::CloseCurrentPopup();
+        if (liveBackendsAvailable()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Open setup")) { showSetup(true); ImGui::CloseCurrentPopup(); }
+        }
+        ImGui::EndPopup();
+    }
 }
 
 }  // namespace gsm

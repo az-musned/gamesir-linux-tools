@@ -242,8 +242,12 @@ TEST("fifo: mixed left/right activations keep arrival order") {
     r.at(t0 + ms(4), pad(BTN_LB | BTN_X));    // L
     CHECK_EQ(r.p.scheduler().queuedIdAt(0), 1);
     CHECK_EQ(r.p.scheduler().queuedIdAt(1), 0);
-    r.at(t0 + ms(20), pad(BTN_LB));           // L ends exactly, gap 0: R starts in the same update
+    r.at(t0 + ms(20), pad(BTN_LB));           // L ends exactly: one update with everything released
+    CHECK_EQ(r.p.scheduler().currentId(), -1);
+    CHECK_EQ(r.p.nextDeadline(), t0 + ms(20));  // gap 0: R is due now
+    r.at(t0 + ms(20), pad(BTN_LB));           // next update, same time: R starts
     CHECK_EQ(r.p.scheduler().currentId(), 1);
+    r.at(t0 + ms(30), pad(BTN_LB));
     r.at(t0 + ms(30), pad(BTN_LB));
     CHECK_EQ(r.p.scheduler().currentId(), 0);
 }

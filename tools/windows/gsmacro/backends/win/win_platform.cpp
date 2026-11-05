@@ -1,4 +1,5 @@
-// Windows host services (see app/platform.h).
+// Windows host services (see app/platform.h). Everything here is read-only
+// except what the user explicitly starts (Live mode, opening HidHide's client).
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -7,15 +8,39 @@
 #endif
 #include <windows.h>
 
+#include <commdlg.h>
+#include <shellapi.h>
 #include <shlobj.h>
+
+#include <cstdio>
 
 #include "../../app/platform.h"
 #include "hidhide_status.h"
 #include "vigem_sink.h"
 #include "win_waiter.h"
 #include "xinput_source.h"
+#include "xinput_util.h"
 
 namespace gsm {
+
+namespace {
+std::string narrow(const std::wstring& w) {
+    if (w.empty()) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    std::string s((size_t)n, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, &s[0], n, nullptr, nullptr);
+    s.resize((size_t)n - 1);
+    return s;
+}
+std::wstring widen(const std::string& s) {
+    if (s.empty()) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring w((size_t)n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], n);
+    w.resize((size_t)n - 1);
+    return w;
+}
+}  // namespace
 
 double processCpuSeconds() {
     FILETIME c, e, k, u;
@@ -34,10 +59,7 @@ std::string defaultConfigPath() {
         CoTaskMemFree(appdata);
         CreateDirectoryW(dir.c_str(), nullptr);  // per-user app folder only
     }
-    std::wstring path = dir + L"\\gsmacro.cfg";
-    char buf[MAX_PATH * 3];
-    WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, buf, sizeof buf, nullptr, nullptr);
-    return buf;
+    return narrow(dir + L"\\gsmacro.cfg");
 }
 
 bool liveBackendsAvailable() { return true; }
@@ -48,6 +70,122 @@ std::string createLiveBackends(LiveBackends* out) {
     return "";
 }
 
-std::string hidHideStatusText() { return queryHidHide().detail; }
+std::vector<PadSlot> listXInputPads() {
+    std::vector<PadSlot> v;
+    for (auto& s : xi::slots())
+        if (s.connected) v.push_back(PadSlot{s.slot, s.vid, s.pid});
+    return v;
+}
+
+CheckResult checkController() {
+    CheckResult r;
+    std::string err;
+    if (!xi::load(&err)) {
+        r.state = CheckResult::Fail;
+        r.text = err;
+        r.guidance = "XInput 1.4 ships with Windows 10/11; this should not happen on a normal install.";
+        return r;
+    }
+    auto pads = listXInputPads();
+    char b[200];
+    std::string list;
+    for (auto& p : pads) {
+        snprintf(b, sizeof b, "%sslot %d = %04X:%04X", list.empty() ? "" : ", ", p.slot, p.vid, p.pid);
+        list += b;
+    }
+    for (auto& p : pads) {
+        if (p.vid != 0x3537) continue;
+        r.state = p.pid == 0x103D ? CheckResult::Ok : CheckResult::Warn;
+        snprintf(b, sizeof b, "GameSir found in XInput slot %d (%04X:%04X).", p.slot, p.vid, p.pid);
+        r.text = b;
+        if (p.pid != 0x103D) r.guidance = "Expected PID 103D (PC/XInput mode). Hold Home + X for 2 s to switch the pad to PC mode.";
+        return r;
+    }
+    r.state = CheckResult::Fail;
+    r.text = "No GameSir (VID 3537) XInput controller visible to gsmacro" + (list.empty() ? std::string(".") : " (seen: " + list + ").");
+    r.guidance =
+        "1) Connect the controller by USB cable.  2) Make sure it is in PC/XInput mode (Home + X for 2 s).  "
+        "3) If reWASD has a config applied, unapply it - reWASD can hide the physical pad.  "
+        "4) If HidHide already hides the pad, add gsmacro.exe to HidHide's applications list.";
+    return r;
+}
+
+CheckResult checkViGEm() {
+    CheckResult r;
+    ViGEmProbe p = probeViGEm();
+    r.text = p.text;
+    if (p.busConnected) {
+        r.state = CheckResult::Ok;
+    } else if (!p.dllLoaded) {
+        r.state = CheckResult::Fail;
+        r.guidance = "ViGEmClient.dll must sit next to gsmacro.exe. Re-extract the gsmacro ZIP (it ships the DLL).";
+    } else {
+        r.state = CheckResult::Fail;
+        r.guidance =
+            "The ViGEmBus driver did not answer. It should already be installed on this PC: check 'Nefarius Virtual Gamepad "
+            "Emulation Bus' in Device Manager > System devices. gsmacro never installs drivers; reinstalling ViGEmBus "
+            "(official Nefarius release) is your decision.";
+    }
+    return r;
+}
+
+CheckResult checkHidHide() {
+    CheckResult r;
+    HidHideStatus h = queryHidHide();
+    r.text = h.detail;
+    if (!h.serviceFound) {
+        r.state = CheckResult::Warn;
+        r.guidance = "Without HidHide the game sees BOTH the physical pad and the virtual pad (doubled input). "
+                     "Install HidHide (official Nefarius release) only if you decide to; gsmacro will not install it.";
+    } else if (!h.running) {
+        r.state = CheckResult::Warn;
+        r.guidance = "HidHide is installed but its driver service is not running. A reboot usually fixes this.";
+    } else {
+        r.state = CheckResult::Ok;
+    }
+    return r;
+}
+
+int virtualPadSlot(LiveBackends* lb) {
+    if (!lb || !lb->output) return -1;
+    auto* sink = dynamic_cast<ViGEmSink*>(lb->output.get());
+    return sink ? sink->userIndex() : -1;
+}
+
+bool readXInputSlot(int slot, GamepadState* out) { return xi::getState(slot, nullptr, out); }
+
+bool openHidHideClient(std::string* err) {
+    const wchar_t* candidates[] = {
+        L"C:\\Program Files\\Nefarius Software Solutions\\HidHide\\x64\\HidHideClient.exe",
+        L"C:\\Program Files\\Nefarius Software Solutions e.U\\HidHide\\x64\\HidHideClient.exe",
+    };
+    for (auto* p : candidates) {
+        if (GetFileAttributesW(p) == INVALID_FILE_ATTRIBUTES) continue;
+        if ((INT_PTR)ShellExecuteW(nullptr, L"open", p, nullptr, nullptr, SW_SHOWNORMAL) > 32) return true;
+    }
+    *err = "HidHide Configuration Client not found at its default location. Open it from the Start menu (search \"HidHide\").";
+    return false;
+}
+
+bool openGameControllersPanel() {
+    return (INT_PTR)ShellExecuteW(nullptr, L"open", L"control.exe", L"joy.cpl", nullptr, SW_SHOWNORMAL) > 32;
+}
+
+bool pickFile(bool save, std::string* path) {
+    wchar_t buf[MAX_PATH * 2] = L"";
+    std::wstring init = widen(*path);
+    if (init.size() < MAX_PATH * 2) wcscpy(buf, init.c_str());
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof ofn;
+    ofn.lpstrFilter = L"gsmacro config (*.cfg)\0*.cfg\0Text (*.txt)\0*.txt\0All files\0*.*\0";
+    ofn.lpstrFile = buf;
+    ofn.nMaxFile = MAX_PATH * 2;
+    ofn.lpstrDefExt = L"cfg";
+    ofn.Flags = OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : (OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST));
+    BOOL ok = save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
+    if (!ok) return false;
+    *path = narrow(buf);
+    return true;
+}
 
 }  // namespace gsm

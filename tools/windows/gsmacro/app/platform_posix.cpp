@@ -23,6 +23,21 @@ std::string defaultConfigPath() {
 
 bool liveBackendsAvailable() { return false; }
 std::string createLiveBackends(LiveBackends*) { return "Live mode needs the Windows build (XInput + ViGEmBus)."; }
-std::string hidHideStatusText() { return "HidHide is Windows-only (not applicable on this host)."; }
+
+static CheckResult na(const char* what) {
+    CheckResult r;
+    r.state = CheckResult::NotApplicable;
+    r.text = std::string(what) + ": Windows only - not checked on this host.";
+    return r;
+}
+std::vector<PadSlot> listXInputPads() { return {}; }
+CheckResult checkController() { return na("GameSir controller (XInput)"); }
+CheckResult checkViGEm() { return na("ViGEmBus / ViGEmClient.dll"); }
+CheckResult checkHidHide() { return na("HidHide"); }
+int virtualPadSlot(LiveBackends*) { return -1; }
+bool readXInputSlot(int, GamepadState*) { return false; }
+bool openHidHideClient(std::string* err) { *err = "HidHide is Windows-only."; return false; }
+bool pickFile(bool, std::string*) { return false; }
+bool openGameControllersPanel() { return false; }
 
 }  // namespace gsm

@@ -46,8 +46,9 @@ std::vector<std::string> validateMacro(const Macro& m) {
     if (m.actions.empty()) { w.push_back("Macro is empty."); return w; }
     // Track when each button/axis was last asserted, to find zero-length holds.
     double t = 0;
-    double pressedAt[16];
+    double pressedAt[16], releasedAt[16];
     for (double& p : pressedAt) p = -1;
+    for (double& p : releasedAt) p = -1;
     double axisAt[AXIS_COUNT];
     for (double& p : axisAt) p = -1;
     bool anyWait = false;
@@ -63,6 +64,12 @@ std::vector<std::string> validateMacro(const Macro& m) {
         case Op::Press:
         case Op::Suppress:
             if (!a.buttons) { snprintf(buf, sizeof buf, "Step %zu: no button selected.", i + 1); w.push_back(buf); }
+            for (int b = 0; b < 16; b++)
+                if (a.op == Op::Press && (a.buttons & (1u << b)) && releasedAt[b] == t) {
+                    snprintf(buf, sizeof buf, "Step %zu: %s is pressed again at the same instant it was released - the game never sees the release. Add a wait.",
+                             i + 1, buttonName((uint16_t)(1u << b)));
+                    w.push_back(buf);
+                }
             for (int b = 0; b < 16; b++) if (a.buttons & (1u << b)) pressedAt[b] = t;
             break;
         case Op::Release:
@@ -73,7 +80,8 @@ std::vector<std::string> validateMacro(const Macro& m) {
                              i + 1, buttonName((uint16_t)(1u << b)));
                     w.push_back(buf);
                 }
-            for (int b = 0; b < 16; b++) if (a.buttons & (1u << b)) pressedAt[b] = -1;
+            for (int b = 0; b < 16; b++)
+                if (a.buttons & (1u << b)) { pressedAt[b] = -1; releasedAt[b] = t; }
             break;
         case Op::SetAxis:
             axisAt[a.axis] = t;

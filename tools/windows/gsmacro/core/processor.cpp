@@ -34,6 +34,14 @@ int Processor::pickSide(const GamepadState& phys) const {
     return l ? 0 : r ? 1 : -1;
 }
 
+bool Processor::trigger(int side, Time now) {
+    if (side < 0 || side > 1 || !compiled_[side]) return false;
+    if (compiled_[side]->events.empty() && compiled_[side]->duration == 0) return false;
+    if (!sched_.enqueue(compiled_[side], now)) return false;
+    chords_.manual++;
+    return true;
+}
+
 GamepadState Processor::process(const GamepadState& phys, bool connected, Time now) {
     const Settings& s = cfg_->settings;
     if (!connected) {
@@ -63,7 +71,9 @@ GamepadState Processor::process(const GamepadState& phys, bool connected, Time n
 
     if (pressed & s.chordButton) {
         int side = pickSide(phys);
-        if (side < 0) {
+        if (side >= 0 && !s.macrosArmed) {
+            chords_.disarmed++;  // master switch off: Square behaves normally
+        } else if (side < 0) {
             chords_.passthrough++;
         } else if (!(side == 0 ? s.leftEnabled : s.rightEnabled) || !compiled_[side] ||
                    (compiled_[side]->events.empty() && compiled_[side]->duration == 0)) {

@@ -79,7 +79,13 @@ void MacroScheduler::update(Time now) {
         if (next_ < ev.size() || now < start_ + cur_->duration) return;
         if (cur_->duration > 0) lateness_.add(now - (start_ + cur_->duration));
         finish();
-        // Loop: with gap 0 the next macro may start in this same update.
+        // Return instead of starting the next queued macro in this same
+        // update: the caller then emits one output sample with every
+        // override released, so even with a 0 ms gap each macro's buttons
+        // show a real release before the next macro presses them again.
+        // nextDeadline() is already due, so the engine runs the next update
+        // immediately (same scheduled start time - no drift).
+        return;
     }
 }
 

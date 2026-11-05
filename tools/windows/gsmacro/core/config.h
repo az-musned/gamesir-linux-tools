@@ -34,6 +34,9 @@ struct Settings {
     // Which macro L1+R1+Square picks.
     BothBumpers bothBumpers = BothBumpers::Latest;
     bool leftEnabled = true, rightEnabled = true;
+    // Master switch. Off = pure passthrough (Square always passes, no chord
+    // macros). Live Mode starts with this off until passthrough is verified.
+    bool macrosArmed = true;
     uint16_t chordButton = BTN_X;     // Square
     uint16_t leftModifier = BTN_LB;   // L1
     uint16_t rightModifier = BTN_RB;  // R1

@@ -3,8 +3,8 @@
 // ViGEmClient.dll next to the exe, so the build needs no SDK and the app
 // still starts (in Demo Mode) when the DLL is missing.
 //
-// Function signatures follow ViGEmClient 1.17+ (notification callback with a
-// user-data pointer). UNTESTED ON HARDWARE.
+// Declarations checked against the official ViGEmClient v1.21.222.0 headers
+// (include/ViGEm/Client.h, Common.h). UNTESTED ON HARDWARE.
 #pragma once
 #include <functional>
 #include <mutex>
@@ -24,13 +24,24 @@ public:
 
     // Called from ViGEm's notification thread.
     void onRumble(uint8_t large, uint8_t small);
+    // XInput slot Windows assigned to the virtual pad, or -1 (not yet known).
+    int userIndex();
 
 private:
     void* client_ = nullptr;
     void* target_ = nullptr;
+    int userIndex_ = -1;
     bool notifRegistered_ = false;
     std::mutex rumbleLock_;
     std::function<void(uint8_t, uint8_t)> rumble_;
 };
+
+// Read-only availability check: loads ViGEmClient.dll and opens (then closes)
+// a bus connection without creating any virtual device.
+struct ViGEmProbe {
+    bool dllLoaded = false, busConnected = false;
+    std::string text;
+};
+ViGEmProbe probeViGEm();
 
 }  // namespace gsm

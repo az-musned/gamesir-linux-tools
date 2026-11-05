@@ -20,7 +20,8 @@ namespace {
 typedef DWORD VIGEM_ERROR;
 const VIGEM_ERROR VIGEM_ERROR_NONE = 0x20000000;
 const VIGEM_ERROR VIGEM_ERROR_BUS_NOT_FOUND = 0xE0000001;
-const VIGEM_ERROR VIGEM_ERROR_BUS_VERSION_MISMATCH = 0xE000000E;
+const VIGEM_ERROR VIGEM_ERROR_BUS_VERSION_MISMATCH = 0xE0000008;
+const VIGEM_ERROR VIGEM_ERROR_BUS_ACCESS_FAILED = 0xE0000003;
 
 struct XUSB_REPORT {
     USHORT wButtons;
@@ -41,6 +42,7 @@ typedef void(__cdecl* PFN_target_free)(void*);
 typedef VIGEM_ERROR(__cdecl* PFN_target_x360_update)(void*, void*, XUSB_REPORT);
 typedef VIGEM_ERROR(__cdecl* PFN_target_x360_register_notification)(void*, void*, PFN_X360_NOTIFICATION, LPVOID);
 typedef void(__cdecl* PFN_target_x360_unregister_notification)(void*);
+typedef VIGEM_ERROR(__cdecl* PFN_target_x360_get_user_index)(void*, void*, PULONG);
 
 struct Api {
     HMODULE dll = nullptr;
@@ -55,6 +57,7 @@ struct Api {
     PFN_target_x360_update update = nullptr;
     PFN_target_x360_register_notification regNotif = nullptr;
     PFN_target_x360_unregister_notification unregNotif = nullptr;
+    PFN_target_x360_get_user_index userIndex = nullptr;
 } g;
 
 template <class F>
@@ -74,6 +77,7 @@ bool loadApi(std::string* err) {
               load(&g.update, "vigem_target_x360_update");
     load(&g.regNotif, "vigem_target_x360_register_notification");      // optional (rumble)
     load(&g.unregNotif, "vigem_target_x360_unregister_notification");
+    load(&g.userIndex, "vigem_target_x360_get_user_index");
     if (!ok) {
         *err = "ViGEmClient.dll is missing expected exports";
         FreeLibrary(g.dll);
@@ -90,7 +94,8 @@ VOID CALLBACK onNotification(void*, void*, UCHAR large, UCHAR small, UCHAR, LPVO
 std::string errText(const char* what, VIGEM_ERROR e) {
     char b[160];
     const char* hint = e == VIGEM_ERROR_BUS_NOT_FOUND ? " (ViGEmBus driver not installed or not running)"
-                       : e == VIGEM_ERROR_BUS_VERSION_MISMATCH ? " (ViGEmBus / ViGEmClient version mismatch)" : "";
+                       : e == VIGEM_ERROR_BUS_VERSION_MISMATCH ? " (ViGEmBus / ViGEmClient version mismatch - update ViGEmBus)"
+                       : e == VIGEM_ERROR_BUS_ACCESS_FAILED ? " (could not open the ViGEmBus device)" : "";
     std::snprintf(b, sizeof b, "%s failed: 0x%08lX%s", what, (unsigned long)e, hint);
     return b;
 }
@@ -99,6 +104,7 @@ std::string errText(const char* what, VIGEM_ERROR e) {
 
 bool ViGEmSink::open(std::string* err) {
     close();
+    userIndex_ = -1;
     if (!loadApi(err)) return false;
     client_ = g.alloc();
     if (!client_) { *err = "vigem_alloc failed"; return false; }
@@ -147,6 +153,32 @@ bool ViGEmSink::submit(const GamepadState& s) {
     r.sThumbRX = s.rx;
     r.sThumbRY = s.ry;
     return g.update(client_, target_, r) == VIGEM_ERROR_NONE;
+}
+
+int ViGEmSink::userIndex() {
+    if (userIndex_ >= 0 || !target_ || !g.userIndex) return userIndex_;
+    ULONG idx = 0;
+    if (g.userIndex(client_, target_, &idx) == VIGEM_ERROR_NONE && idx < 4) userIndex_ = (int)idx;
+    return userIndex_;
+}
+
+ViGEmProbe probeViGEm() {
+    ViGEmProbe p;
+    std::string err;
+    if (!loadApi(&err)) { p.text = err; return p; }
+    p.dllLoaded = true;
+    void* c = g.alloc();
+    if (!c) { p.text = "ViGEmClient.dll loaded, but vigem_alloc failed"; return p; }
+    VIGEM_ERROR e = g.connect(c);
+    if (e == VIGEM_ERROR_NONE) {
+        p.busConnected = true;
+        p.text = "ViGEmClient.dll loaded; ViGEmBus driver reachable";
+        g.disconnect(c);
+    } else {
+        p.text = "ViGEmClient.dll loaded; " + errText("connecting to ViGEmBus", e);
+    }
+    g.free_(c);
+    return p;
 }
 
 void ViGEmSink::setRumbleHandler(std::function<void(uint8_t, uint8_t)> h) {

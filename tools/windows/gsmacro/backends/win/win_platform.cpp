@@ -11,6 +11,10 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <tlhelp32.h>
+#include <cfgmgr32.h>
+
+#include <cwchar>
 
 #include <cstdio>
 
@@ -185,6 +189,71 @@ bool pickFile(bool save, std::string* path) {
     BOOL ok = save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
     if (!ok) return false;
     *path = narrow(buf);
+    return true;
+}
+
+bool isProcessRunning(const char* exeName) {
+    std::wstring want = widen(exeName);
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof pe;
+    bool found = false;
+    for (BOOL ok = Process32FirstW(snap, &pe); ok && !found; ok = Process32NextW(snap, &pe))
+        found = _wcsicmp(pe.szExeFile, want.c_str()) == 0;
+    CloseHandle(snap);
+    return found;
+}
+
+int gameSirXInputSlot() {
+    std::string err;
+    if (!xi::load(&err)) return -1;
+    return xi::findSlot(0x3537);
+}
+
+bool anyPadInSlot(int slot) {
+    std::string err;
+    if (!xi::load(&err)) return false;
+    for (auto& s : xi::slots())
+        if (s.slot == slot && s.connected) return true;
+    return false;
+}
+
+int gameSirXusbState() {
+    const wchar_t* prefix = L"USB\\VID_3537&PID_103D&MI_00\\";
+    ULONG len = 0;
+    const ULONG flags = CM_GETIDLIST_FILTER_ENUMERATOR | CM_GETIDLIST_FILTER_PRESENT;
+    if (CM_Get_Device_ID_List_SizeW(&len, L"USB", flags) != CR_SUCCESS || len == 0) return -1;
+    std::wstring buf(len, L'\0');
+    if (CM_Get_Device_ID_ListW(L"USB", &buf[0], len, flags) != CR_SUCCESS) return -1;
+    for (const wchar_t* id = buf.c_str(); *id; id += wcslen(id) + 1) {
+        if (_wcsnicmp(id, prefix, wcslen(prefix)) != 0) continue;
+        DEVINST dn;
+        if (CM_Locate_DevNodeW(&dn, const_cast<wchar_t*>(id), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS) return 1;
+        ULONG status = 0, problem = 0;
+        if (CM_Get_DevNode_Status(&status, &problem, dn, 0) != CR_SUCCESS) return 1;
+        return (status & DN_STARTED) && problem != CM_PROB_DISABLED ? 0 : 1;
+    }
+    return -1;
+}
+
+bool runSlot0Task(std::string* err) {
+    wchar_t cmd[] = L"schtasks.exe /run /tn \"gsmacro slot0\"";
+    STARTUPINFOW si{};
+    si.cb = sizeof si;
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, cmd, nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        *err = "could not start schtasks.exe";
+        return false;
+    }
+    DWORD code = 1;
+    if (WaitForSingleObject(pi.hProcess, 10000) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    if (code != 0) {
+        *err = "the \"gsmacro slot0\" scheduled task is missing or could not run - run setup-autostart.ps1 once";
+        return false;
+    }
     return true;
 }
 

@@ -138,7 +138,7 @@ void App::startDemo() {
     timeline_.clear();
 }
 
-void App::startLive() {
+void App::startLive(bool quiet) {
     player_.stop();
     stopEngine();
     // Live Mode always starts as pure passthrough: macros are armed only after
@@ -153,9 +153,15 @@ void App::startLive() {
         if (engine_->start(live_.input.get(), live_.output.get(), std::make_shared<const Config>(cfg_), &err)) {
             mode_ = Mode::Live;
             timeline_.clear();
+            gameRunning_ = -1;  // background mode re-applies the game-based arming
             return;
         }
         live_ = LiveBackends();
+    }
+    if (quiet) {
+        startDemo();
+        autoStatus_ = "Live Mode could not start yet (" + err + ") - retrying";
+        return;
     }
     std::string guidance;
     if (err.find("ViGEmClient.dll") != std::string::npos)
@@ -169,6 +175,69 @@ void App::startLive() {
         guidance = "Run the setup checks (Setup button) to see which part is missing.";
     startDemo();
     showError("Live Mode could not start", err, guidance + " gsmacro is back in Demo Mode; your controller is unaffected.");
+}
+
+// ───────────────────────── background mode ─────────────────────────
+
+void App::enableAutostart() {
+    autostart_ = true;
+    setupOpen_ = false;   // never pop the first-run wizard in the background
+    nextLiveTry_ = 0;
+    autoStatus_ = "Background mode: starting Live Mode";
+}
+
+void App::backgroundTick() {
+    if (!autostart_) return;
+    Time now = clock_.now();
+
+    // 1. Before Live Mode: free XInput slot 0 for the virtual pad (games treat
+    //    slot 0 as player 1). This must happen before gsmacro reads the GameSir
+    //    through XInput: XInput keeps the device open, and Windows then refuses
+    //    to disable it ("reboot needed"). Only the PnP tree is queried here.
+    if (mode_ != Mode::Live) {
+        if (now < nextLiveTry_) return;
+        if (boot_ == Boot::Start) {
+            if (gameSirXusbState() >= 0) {  // present (running, or already disabled): let the task handle it
+                std::string err;
+                if (runSlot0Task(&err)) {
+                    boot_ = Boot::WaitOff;
+                    bootDeadline_ = now + ms(30000);
+                    autoStatus_ = "Freeing XInput slot 0 (GameSir briefly off)";
+                } else {
+                    boot_ = Boot::Ready;
+                    autoStatus_ = err;
+                }
+            } else {
+                boot_ = Boot::Ready;  // not plugged in: it will join after the virtual pad (slot 1)
+            }
+        }
+        if (boot_ == Boot::WaitOff) {
+            if (gameSirXusbState() != 0) boot_ = Boot::Ready;  // its XInput interface is off: slot 0 is free
+            else if (now >= bootDeadline_) { boot_ = Boot::Ready; autoStatus_ = "The slot-0 task did not free slot 0"; }
+            else return;
+        }
+        // 2. Live Mode (retried: ViGEmBus may not be ready right after login).
+        nextLiveTry_ = now + ms(5000);
+        startLive(true);  // the task re-enables the GameSir once the virtual pad has slot 0
+        return;
+    }
+    if (virtualSlot_ < 0) virtualSlot_ = virtualPadSlot(&live_);
+    slotWarn_ = virtualSlot_ > 0;
+    if (slotWarn_) autoStatus_ = "Virtual pad is in XInput slot " + std::to_string(virtualSlot_) + ", not player 1 - restart gsmacro (tray > Exit, then start it)";
+
+    // 3. Arm the macros only while the game runs (Square is a hidden shift key
+    //    while armed, so everything else keeps a normal Square).
+    if (now >= nextGameCheck_) {
+        nextGameCheck_ = now + ms(1000);
+        int running = isProcessRunning(kGameExe) ? 1 : 0;
+        if (running != gameRunning_) {
+            gameRunning_ = running;
+            cfg_.settings.macrosArmed = running == 1;
+            applyConfig();
+            if (!slotWarn_)
+                autoStatus_ = running ? "Rocket League running - macros ARMED" : "Rocket League not running - macros off";
+        }
+    }
 }
 
 void App::applyConfig() {
@@ -450,6 +519,10 @@ void App::drawStatusStrip() {
         else snprintf(b, sizeof b, "Virtual Xbox 360 pad: created (slot pending)");
         chip(b, snap_.submitFailures ? kBlocked : kOk, "Created through ViGEmBus. Removed when Live Mode stops or gsmacro closes.");
     }
+    if (autostart_)
+        chip(autoStatus_.c_str(), slotWarn_ ? kBlocked : kOk,
+             "Background mode (--autostart): Live Mode starts by itself, macros arm while RocketLeague.exe runs, and the "
+             "virtual pad is moved to XInput slot 0. Close the window to hide it; tray icon > Exit to quit.");
     if (liveBackendsAvailable()) {
         chip("ViGEmBus", stateCol(chkViGEm_.state), chkViGEm_.text.empty() ? "Not checked yet - open Setup." : chkViGEm_.text.c_str());
         chip("HidHide", stateCol(chkHidHide_.state), chkHidHide_.text.empty() ? "Not checked yet - open Setup." : chkHidHide_.text.c_str());

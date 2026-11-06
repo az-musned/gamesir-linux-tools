@@ -39,5 +39,10 @@ bool readXInputSlot(int, GamepadState*) { return false; }
 bool openHidHideClient(std::string* err) { *err = "HidHide is Windows-only."; return false; }
 bool pickFile(bool, std::string*) { return false; }
 bool openGameControllersPanel() { return false; }
+bool isProcessRunning(const char*) { return false; }
+int gameSirXInputSlot() { return -1; }
+bool anyPadInSlot(int) { return false; }
+int gameSirXusbState() { return -1; }
+bool runSlot0Task(std::string* err) { *err = "Windows only."; return false; }
 
 }  // namespace gsm

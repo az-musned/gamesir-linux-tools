@@ -3,9 +3,9 @@
 #
 # Windows hands out XInput slots in connection order and a HidHide-hidden pad
 # still holds its slot. This does in software what unplugging does:
-#   1. an elevated helper disables the GameSir's USB device (VID 3537); Windows
-#      may refuse that ("critical system device"), then it disables only the
-#      pad's XInput interface (&MI_00), which is what holds the XInput slot
+#   1. an elevated helper disables the GameSir's XInput interface (&MI_00),
+#      which is what holds the XInput slot (fallback: the whole USB device,
+#      which Windows refused on the target PC as a "critical system device")
 #   2. gsmacro is opened normally (as you, not as admin)
 #   3. you click Start Live Mode; the virtual pad takes slot 0
 #   4. the helper re-enables the GameSir (it lands in slot 1, hidden)
@@ -18,7 +18,9 @@
 # Device state only: no drivers, no HidHide / reWASD / controller settings.
 # One UAC prompt (for the helper). Run it from the shortcut, not elevated.
 param(
-    [ValidateSet('launch', 'cycle', 'enable')] [string]$Mode = 'launch',
+    # launch: interactive launcher; cycle/enable: its elevated helper;
+    # boot: run by the "gsmacro slot0" scheduled task when gsmacro --autostart asks
+    [ValidateSet('launch', 'cycle', 'enable', 'boot')] [string]$Mode = 'launch',
     [string]$Id = '',
     [int]$ParentPid = 0,
     [int]$TimeoutSec = 180
@@ -38,6 +40,10 @@ function GameSirParent {
     Get-PnpDevice -ErrorAction SilentlyContinue |
         Where-Object { $_.InstanceId -match '^USB\\VID_3537&PID_103D\\[^&]+$' -and $_.Problem -ne 'CM_PROB_PHANTOM' } |
         Select-Object -First 1
+}
+function PendingDisable($devId) {   # CONFIGFLAG_DISABLED stored (applies at boot even if the device runs now)
+    $f = (Get-PnpDeviceProperty -InstanceId $devId -KeyName DEVPKEY_Device_ConfigFlags -ErrorAction SilentlyContinue).Data
+    [bool]($f -band 1)
 }
 function IsDisabled($d) { $d -and $d.Status -ne 'OK' -and ($d.Problem -eq 'CM_PROB_DISABLED' -or $d.ConfigManagerErrorCode -eq 22) }
 function Enable-Pad($devId) {
@@ -60,20 +66,46 @@ function Start-Helper([string]$helperMode, [string]$devId, [switch]$Wait) {
 
 # ── elevated helper ────────────────────────────────────────────────────────
 if ($Mode -eq 'enable') { [void](Enable-Pad $Id); exit }
+if ($Mode -eq 'boot') {
+    # Scheduled task: gsmacro --autostart asks for this BEFORE it starts Live Mode
+    # (it waits until the XInput interface is off, then creates its pad in slot 0).
+    # No launcher window to watch.
+    $pad = GameSirParent
+    if (-not $pad) { Log 'boot: GameSir not found'; exit }
+    $Id = $pad.InstanceId
+    $ParentPid = 0
+    if ($TimeoutSec -gt 60) { $TimeoutSec = 60 }
+    Log "boot: requested by gsmacro --autostart"
+    $Mode = 'cycle'
+}
 if ($Mode -eq 'cycle') {
     $disabled = @()
     try {
         Log "helper start: admin=$(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) id=[$Id] parent=$ParentPid"
-        # Try the whole USB device first (like the cable); if Windows refuses, disable just the
-        # XInput interface (MI_00), which is what holds the XInput slot.
-        $xusb = (Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -like 'USB\VID_3537&PID_103D&MI_00\*' -and $_.Status -eq 'OK' } | Select-Object -First 1).InstanceId
-        foreach ($target in @($Id, $xusb) | Where-Object { $_ }) {
-            $out = (& pnputil /disable-device "$target" 2>&1 | Out-String).Trim()
-            Log "pnputil /disable-device [$target] exit=$LASTEXITCODE :: $($out -replace '\s+', ' ')"
-            Start-Sleep -Milliseconds 700
-            $st = Get-PnpDevice -InstanceId $target -ErrorAction SilentlyContinue
-            Log "  -> status=$($st.Status) problem=$($st.Problem)"
-            if ($st -and $st.Status -ne 'OK') { $disabled += $target; break }
+        # Disable the XInput interface (MI_00), which is what holds the XInput slot; if that
+        # fails, try the whole USB device (on the target PC Windows refuses the latter as a
+        # "critical system device", which costs ~10 s, so it is only the fallback).
+        $xusbDev = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -like 'USB\VID_3537&PID_103D&MI_00\*' -and $_.Problem -ne 'CM_PROB_PHANTOM' } | Select-Object -First 1
+        if ($xusbDev -and (IsDisabled $xusbDev)) {
+            # Already off (e.g. a disable stored by an earlier run took effect at boot): just wait and re-enable.
+            Log "XInput interface already disabled [$($xusbDev.InstanceId)] - using it as is"
+            $disabled += $xusbDev.InstanceId
+        } else {
+            foreach ($target in @($xusbDev.InstanceId, $Id) | Where-Object { $_ }) {
+                $out = (& pnputil /disable-device "$target" 2>&1 | Out-String).Trim()
+                $code = $LASTEXITCODE
+                Log "pnputil /disable-device [$target] exit=$code :: $($out -replace '\s+', ' ')"
+                Start-Sleep -Milliseconds 700
+                $st = Get-PnpDevice -InstanceId $target -ErrorAction SilentlyContinue
+                Log "  -> status=$($st.Status) problem=$($st.Problem) pendingDisable=$(PendingDisable $target)"
+                if ($st -and $st.Status -ne 'OK') { $disabled += $target; break }
+                # Refused while running (e.g. exit 3010 "reboot needed": some process holds it open).
+                # Windows may have STORED the disable for the next boot - undo that now.
+                if ($code -eq 3010 -or (PendingDisable $target)) {
+                    $ok = Enable-Pad $target
+                    Log "  undo stored disable [$target] ok=$ok pendingDisable=$(PendingDisable $target)"
+                }
+            }
         }
         if (-not $disabled) { Log 'STATE failed: no device could be disabled'; exit }
         Log "STATE disabled $($disabled -join ',')"

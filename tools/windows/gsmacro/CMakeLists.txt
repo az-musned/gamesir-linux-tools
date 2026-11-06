@@ -45,7 +45,7 @@ if(WIN32)
     backends/win/hidhide_status.cpp
     backends/win/win_waiter.cpp
     backends/win/win_platform.cpp)
-  target_link_libraries(gsm_win PUBLIC gsm_core advapi32 avrt shell32 ole32 comdlg32)
+  target_link_libraries(gsm_win PUBLIC gsm_core advapi32 avrt shell32 ole32 comdlg32 cfgmgr32)
   target_compile_definitions(gsm_win PUBLIC UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 

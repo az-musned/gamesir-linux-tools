@@ -9,6 +9,8 @@
 #endif
 #include <windows.h>
 #include <d3d11.h>
+#include <shellapi.h>
+#include <cwchar>
 
 #include "gui.h"
 #include "imgui.h"
@@ -25,6 +27,31 @@ IDXGISwapChain* g_swap = nullptr;
 ID3D11RenderTargetView* g_rtv = nullptr;
 UINT g_resizeW = 0, g_resizeH = 0;
 bool g_occluded = false;
+
+// Tray icon (background mode, --autostart).
+const UINT WM_TRAY = WM_APP + 1;   // notification-area callbacks
+const UINT WM_SHOWMAIN = WM_APP + 2;  // a second gsmacro.exe asks the running one to show itself
+const UINT ID_OPEN = 1, ID_EXIT = 2;
+bool g_tray = false;
+UINT g_taskbarCreated = 0;
+NOTIFYICONDATAW g_nid{};
+
+void addTrayIcon(HWND hwnd) {
+    g_nid = NOTIFYICONDATAW{};
+    g_nid.cbSize = sizeof g_nid;
+    g_nid.hWnd = hwnd;
+    g_nid.uID = 1;
+    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    g_nid.uCallbackMessage = WM_TRAY;
+    g_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wcscpy_s(g_nid.szTip, L"gsmacro (background) - double-click to open");
+    Shell_NotifyIconW(NIM_ADD, &g_nid);
+}
+
+void showMain(HWND hwnd) {
+    ShowWindow(hwnd, IsIconic(hwnd) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(hwnd);
+}
 
 void createRenderTarget() {
     ID3D11Texture2D* back = nullptr;
@@ -81,8 +108,37 @@ LRESULT WINAPI wndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_SYSCOMMAND:
         if ((wParam & 0xfff0) == SC_KEYMENU) return 0;
         break;
+    case WM_CLOSE:
+        if (g_tray) { ShowWindow(hWnd, SW_HIDE); return 0; }  // background mode: X hides, tray > Exit quits
+        break;
+    case WM_TRAY:
+        if (LOWORD(lParam) == WM_LBUTTONDBLCLK) showMain(hWnd);
+        else if (LOWORD(lParam) == WM_RBUTTONUP || LOWORD(lParam) == WM_CONTEXTMENU) {
+            HMENU m = CreatePopupMenu();
+            AppendMenuW(m, MF_STRING, ID_OPEN, L"Open gsmacro");
+            AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(m, MF_STRING, ID_EXIT, L"Exit (removes the virtual pad)");
+            POINT p;
+            GetCursorPos(&p);
+            SetForegroundWindow(hWnd);
+            TrackPopupMenu(m, TPM_RIGHTBUTTON, p.x, p.y, 0, hWnd, nullptr);
+            DestroyMenu(m);
+        }
+        return 0;
+    case WM_SHOWMAIN:
+        showMain(hWnd);
+        return 0;
+    case WM_COMMAND:
+        if (LOWORD(wParam) == ID_OPEN) { showMain(hWnd); return 0; }
+        if (LOWORD(wParam) == ID_EXIT) { DestroyWindow(hWnd); return 0; }
+        break;
     case WM_DESTROY:
+        if (g_tray) { Shell_NotifyIconW(NIM_DELETE, &g_nid); g_tray = false; }
         PostQuitMessage(0);
+        return 0;
+    }
+    if (g_taskbarCreated && msg == g_taskbarCreated && g_tray) {  // Explorer restarted: re-add the icon
+        addTrayIcon(hWnd);
         return 0;
     }
     return DefWindowProcW(hWnd, msg, wParam, lParam);
@@ -91,6 +147,15 @@ LRESULT WINAPI wndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    const bool autostart = wcsstr(GetCommandLineW(), L"--autostart") != nullptr;
+    // One gsmacro per user session: two would create two virtual pads. A second
+    // start just brings the running one to the front.
+    HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\gsmacro-single-instance");
+    if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
+        if (HWND other = FindWindowW(L"gsmacro", nullptr)) PostMessageW(other, WM_SHOWMAIN, 0, 0);
+        return 0;
+    }
+    g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     ImGui_ImplWin32_EnableDpiAwareness();
     float scale = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
 
@@ -104,8 +169,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         MessageBoxW(nullptr, L"Direct3D 11 initialisation failed.", L"gsmacro", MB_ICONERROR);
         return 1;
     }
-    ShowWindow(hwnd, SW_SHOWDEFAULT);
-    UpdateWindow(hwnd);
+    if (!autostart) {
+        ShowWindow(hwnd, SW_SHOWDEFAULT);
+        UpdateWindow(hwnd);
+    }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -117,6 +184,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         gsm::App app;
         app.loadFonts(scale);
         app.applyStyle(scale);
+        if (autostart) {
+            app.enableAutostart();
+            g_tray = true;
+            addTrayIcon(hwnd);
+        }
         bool done = false;
         while (!done) {
             MSG msg;
@@ -126,8 +198,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 if (msg.message == WM_QUIT) done = true;
             }
             if (done) break;
-            if (IsIconic(hwnd) || (g_occluded && g_swap->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED)) {
-                Sleep(50);  // minimised / hidden: don't render
+            app.backgroundTick();  // background mode: Live Mode, slot 0, game-based arming (no-op otherwise)
+            if (!IsWindowVisible(hwnd) || IsIconic(hwnd) ||
+                (g_occluded && g_swap->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED)) {
+                Sleep(50);  // minimised / hidden in the tray: don't render
                 continue;
             }
             g_occluded = false;

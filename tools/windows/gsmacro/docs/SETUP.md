@@ -73,7 +73,24 @@ virtual pad sits in slot 1 and games treat it as **player 2**. Start Live
 Mode **before** plugging the pad in (or unplug it, Start Live Mode, replug):
 the virtual pad then takes slot 0.
 
-Without unplugging: run `start-gsmacro-slot0.ps1` (e.g. from a shortcut with
+## Run in the background at login (no clicks)
+
+Run `setup-autostart.ps1` once (one admin prompt). From the next login on,
+gsmacro starts by itself with only a tray icon (double-click: window,
+right-click: Open / Exit; the window's X hides it again):
+
+* Live Mode starts automatically (retried until ViGEmBus is ready).
+* Macros are armed only while `RocketLeague.exe` runs, so Square works
+  normally everywhere else; the status strip shows the current state.
+* If the GameSir holds XInput slot 0, gsmacro runs the elevated scheduled task
+  "gsmacro slot0" (no prompt): it disables the pad's XInput interface for a
+  moment, gsmacro recreates its virtual pad in slot 0, and the pad is
+  re-enabled in slot 1. Log: `%TEMP%\gsmacro-slot0.log`.
+
+Undo: `setup-autostart.ps1 -Uninstall` (removes the startup entry and the
+task), then tray icon > Exit.
+
+Without unplugging (manual start): run `start-gsmacro-slot0.ps1` (e.g. from a shortcut with
 target `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
 "C:\Tools\gsmacro\start-gsmacro-slot0.ps1"`). After one admin prompt it
 disables the pad's XInput interface, opens gsmacro, waits for you to click

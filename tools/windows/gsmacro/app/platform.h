@@ -41,4 +41,17 @@ bool openGameControllersPanel();                  // Windows "Set up USB game co
 // GUI then uses its path box).
 bool pickFile(bool save, std::string* path);
 
+// ── background (--autostart) services ──
+bool isProcessRunning(const char* exeName);       // e.g. "RocketLeague.exe" (case-insensitive)
+int gameSirXInputSlot();                          // XInput slot of the GameSir (VID 3537), or -1
+bool anyPadInSlot(int slot);                      // any XInput pad in this slot (as gsmacro sees it)
+// GameSir's XInput interface (USB\VID_3537&PID_103D&MI_00) from the PnP tree,
+// WITHOUT touching XInput (XInput keeps device handles open, which would veto
+// disabling it): -1 not present, 0 present and running, 1 present but disabled/stopped.
+int gameSirXusbState();
+// Runs the elevated "gsmacro slot0" scheduled task (registered once by
+// setup-autostart.ps1). It briefly disables the GameSir's XInput interface so
+// a recreated virtual pad can take slot 0, then re-enables it.
+bool runSlot0Task(std::string* err);
+
 }  // namespace gsm

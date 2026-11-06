@@ -22,6 +22,14 @@ public:
     void applyStyle(float scale);
     void frame();
 
+    // Background mode (gsmacro.exe --autostart): Live Mode starts by itself,
+    // macros arm while the game process runs, and the virtual pad is moved to
+    // XInput slot 0 (player 1) through the "gsmacro slot0" task if needed.
+    // backgroundTick() runs every host loop iteration, also while hidden.
+    void enableAutostart();
+    bool autostart() const { return autostart_; }
+    void backgroundTick();
+
     // Automation hooks (screenshots).
     bool playScenario(const std::string& name);
     void selectMacroTab(int side) { requestTab_ = side; }
@@ -47,7 +55,7 @@ private:
     enum class Mode { Demo, Live };
 
     void startDemo();
-    void startLive();
+    void startLive(bool quiet = false);  // quiet: no error popup, stays in Demo on failure
     void stopEngine();
     void applyConfig();
     void pollEngine();
@@ -122,6 +130,17 @@ private:
     bool readbackOk_ = false;
     Time outStableSince_ = 0;
     uint64_t selfMatch_ = 0, selfMismatch_ = 0;
+
+    // Background mode.
+    static constexpr const char* kGameExe = "RocketLeague.exe";
+    bool autostart_ = false;
+    Time nextLiveTry_ = 0, nextGameCheck_ = 0;
+    int gameRunning_ = -1;  // -1 unknown, 0/1
+    // Boot order: free slot 0 BEFORE Live Mode opens the GameSir through XInput.
+    enum class Boot { Start, WaitOff, Ready } boot_ = Boot::Start;
+    Time bootDeadline_ = 0;
+    bool slotWarn_ = false;
+    std::string autoStatus_;
 
     std::string errTitle_, errText_, errGuidance_;
     bool errPending_ = false;

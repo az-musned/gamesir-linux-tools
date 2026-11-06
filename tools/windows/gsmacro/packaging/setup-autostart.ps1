@@ -12,7 +12,7 @@
 #      so the virtual pad can take slot 0 (player 1), then re-enables it.
 #      See start-gsmacro-slot0.ps1 -Mode boot; log: %TEMP%\gsmacro-slot0.log
 # No drivers, HidHide, reWASD or controller settings are changed.
-param([switch]$Uninstall)
+param([switch]$Uninstall, [switch]$Quiet)
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $exe = Join-Path $here 'gsmacro.exe'
@@ -24,6 +24,7 @@ $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 if (-not $admin) {
     $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
     if ($Uninstall) { $a += '-Uninstall' }
+    if ($Quiet) { $a += '-Quiet' }
     Start-Process powershell.exe -Verb RunAs -ArgumentList $a
     exit
 }
@@ -65,7 +66,10 @@ try {
         Write-Host "Sign out and back in (or restart) to start it, or run: `"$exe`" --autostart"
         Write-Host "Undo: run this script with -Uninstall."
     }
+    "RESULT ok $(if ($Uninstall) { 'Background start removed.' } else { 'Background start set up: gsmacro starts by itself at every login.' })" |
+        Set-Content (Join-Path $env:TEMP 'gsmacro-admin.log') -Encoding utf8
 } catch {
     Write-Host "FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    "RESULT fail Background start setup failed: $($_.Exception.Message)" | Set-Content (Join-Path $env:TEMP 'gsmacro-admin.log') -Encoding utf8
 }
-Read-Host 'Enter to close'
+if (-not $Quiet) { Read-Host 'Enter to close' }

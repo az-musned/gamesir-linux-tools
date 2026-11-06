@@ -199,6 +199,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             }
             if (done) break;
             app.backgroundTick();  // background mode: Live Mode, slot 0, game-based arming (no-op otherwise)
+            if (!g_tray && app.autostart()) {  // "Start with Windows" ticked in the window: switch to tray mode now
+                g_tray = true;
+                addTrayIcon(hwnd);
+            }
             if (!IsWindowVisible(hwnd) || IsIconic(hwnd) ||
                 (g_occluded && g_swap->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED)) {
                 Sleep(50);  // minimised / hidden in the tray: don't render

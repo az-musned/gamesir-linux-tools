@@ -56,4 +56,19 @@ int gameSirXusbState();
 // a recreated virtual pad can take slot 0, then re-enables it.
 bool runSlot0Task(std::string* err);
 
+// ── one-click setup from inside the app (for people who don't use commands) ──
+// gsmacro.cfg shipped next to gsmacro.exe (used on first run when there is no
+// saved config yet), or "" if not applicable.
+std::string bundledConfigPath();
+// Runs a PowerShell script from gsmacro's folder as administrator (one UAC
+// prompt, hidden window) with "-Quiet <args>". The script writes its outcome
+// as "RESULT ok|fail <message>" to %TEMP%\gsmacro-admin.log.
+bool startAdminScript(const char* scriptName, const std::string& args, std::string* err);
+// 0 nothing running, 1 still running, 2 finished (result = "ok ..." / "fail ...").
+int pollAdminScript(std::string* result);
+// The per-user startup entry (HKCU Run "gsmacro" = "<exe>" --autostart). No admin.
+bool autostartEntryPresent();
+bool setAutostartEntry(bool on, std::string* err);
+bool slot0TaskRegistered();                       // the "gsmacro slot0" scheduled task exists
+
 }  // namespace gsm

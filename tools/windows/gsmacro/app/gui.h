@@ -29,6 +29,8 @@ public:
     void enableAutostart();
     bool autostart() const { return autostart_; }
     void backgroundTick();
+    // Background mode started from the window ("Start with Windows" ticked).
+    void startBackgroundNow();
 
     // Automation hooks (screenshots).
     bool playScenario(const std::string& name);
@@ -77,6 +79,8 @@ private:
     void drawMacroSteps(int side);
     void drawTimeline();
     void drawSyncSettings();
+    void drawOneClickSetup();
+    void pollAdmin();
     void drawConfigFile();
     void drawDiagnostics();
     void drawSetupWindow();
@@ -134,6 +138,11 @@ private:
     // Background mode.
     static constexpr const char* kGameExe = "RocketLeague.exe";
     bool autostart_ = false;
+    // One-click setup: 0 none, 1 hide, 2 unhide, 3 autostart helper task.
+    int adminJob_ = 0;
+    bool adminOk_ = false;
+    std::string adminResult_;
+    bool autostartOn_ = false, autostartChecked_ = false;
     Time nextLiveTry_ = 0, nextGameCheck_ = 0;
     int gameRunning_ = -1;  // -1 unknown, 0/1
     // Boot order: free slot 0 BEFORE Live Mode opens the GameSir through XInput.

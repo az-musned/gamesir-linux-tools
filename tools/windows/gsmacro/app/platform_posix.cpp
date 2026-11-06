@@ -45,4 +45,11 @@ bool anyPadInSlot(int) { return false; }
 int gameSirXusbState() { return -1; }
 bool runSlot0Task(std::string* err) { *err = "Windows only."; return false; }
 
+std::string bundledConfigPath() { return ""; }
+bool startAdminScript(const char*, const std::string&, std::string* err) { *err = "Windows only."; return false; }
+int pollAdminScript(std::string*) { return 0; }
+bool autostartEntryPresent() { return false; }
+bool setAutostartEntry(bool, std::string* err) { *err = "Windows only."; return false; }
+bool slot0TaskRegistered() { return false; }
+
 }  // namespace gsm

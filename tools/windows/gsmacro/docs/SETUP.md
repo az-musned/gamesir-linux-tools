@@ -94,6 +94,24 @@ chord work unchanged.
   takes an XInput slot, so the virtual pad is player 1 without any slot handling.
 * `gsm_bench ds5 -t 30` shows what gsmacro decodes (read-only, no virtual pad).
 
+## One-click setup inside the app
+
+Right column, **WINDOWS SETUP** (also in Setup step 6):
+
+* **Hide controller from games** runs `hidhide-setup.ps1 -Mode hide` as
+  administrator (one prompt). It allows gsmacro.exe in HidHide, hides every
+  DualSense (USB) and GameSir game-controller entry Windows knows, including
+  the GameSir's XInput interface (the part HidHide's own window can't show), and
+  turns hiding on. Close HidHide's window first; replug the pad once.
+  **Unhide** removes exactly those entries again. Saving in HidHide's own
+  window later can drop the GameSir XInput entry: click Hide again if a game
+  shows two players.
+* **Start with Windows** adds the per-user startup entry (no admin) and starts
+  background mode right away. With a GameSir it also registers the player-1
+  helper task once (one admin prompt). Untick to remove the startup entry.
+* On first start with no saved config, a `gsmacro.cfg` next to gsmacro.exe is
+  loaded and saved as yours (so a shared package brings its macros along).
+
 ## Run in the background at login (no clicks)
 
 Run `setup-autostart.ps1` once (one admin prompt). From the next login on,

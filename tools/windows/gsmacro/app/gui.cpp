@@ -101,6 +101,11 @@ App::App() {
     bool existed = std::ifstream(cfgPath_).good();
     if (existed && loadConfigFile(cfgPath_, &cfg_, &err)) {
         setStatus("Loaded " + cfgPath_, false);
+    } else if (!existed && std::ifstream(bundledConfigPath()).good() && loadConfigFile(bundledConfigPath(), &cfg_, &err)) {
+        // First run with a gsmacro.cfg shipped next to the exe (e.g. a shared package): use it and save it as ours.
+        std::string serr;
+        if (saveConfigFile(cfgPath_, cfg_, &serr)) setStatus("Loaded the macros shipped with gsmacro and saved them to " + cfgPath_, false);
+        else setStatus("Loaded the macros shipped with gsmacro (could not save: " + serr + ")", true);
     } else {
         cfg_ = defaultConfig();
         if (existed) {
@@ -393,6 +398,7 @@ void App::applyStyle(float scale) {
 
 void App::frame() {
     pollEngine();
+    pollAdmin();
 
     // Manual demo input from the interactive pad (scenario playback has priority).
     if (mode_ == Mode::Demo && !player_.playing()) {
@@ -433,6 +439,9 @@ void App::frame() {
         ImGui::TableSetColumnIndex(2);
         ImGui::BeginChild("##rightcol", ImVec2(0, 0), ImGuiChildFlags_None);
         drawSyncSettings();
+        ImGui::Spacing();
+        sectionTitle("WINDOWS SETUP");
+        drawOneClickSetup();
         drawConfigFile();
         drawDiagnostics();
         ImGui::EndChild();
@@ -1572,6 +1581,8 @@ void App::drawSetupWindow() {
         "pad.  (b) Devices tab: tick the GameSir controller entries, then tick 'Enable device hiding'.  (c) In joy.cpl only ONE "
         "controller should now be listed (the Xbox 360 virtual pad).  To undo at any time: untick the device or 'Enable device "
         "hiding' in HidHide - it takes effect immediately (replug the pad if a game still misses it).");
+    ImGui::TextColored(kDimV, "Or let gsmacro do it:");
+    drawOneClickSetup();
     std::string herr;
     if (ImGui::Button("Open HidHide Configuration Client")) {
         if (!openHidHideClient(&herr)) showError("Could not open HidHide", herr, "");
@@ -1636,6 +1647,88 @@ void App::drawErrorPopup() {
             if (ImGui::Button("Open setup")) { showSetup(true); ImGui::CloseCurrentPopup(); }
         }
         ImGui::EndPopup();
+    }
+}
+
+// ───────────────────────── one-click setup ─────────────────────────
+
+void App::startBackgroundNow() {
+    if (autostart_) return;
+    autostart_ = true;
+    nextLiveTry_ = 0;
+    boot_ = Boot::Start;
+    gameRunning_ = -1;
+    autoStatus_ = "Background mode: starting Live Mode";
+}
+
+void App::pollAdmin() {
+    if (!adminJob_) return;
+    std::string r;
+    if (pollAdminScript(&r) != 2) return;
+    adminOk_ = r.rfind("ok", 0) == 0;
+    adminResult_ = r.size() > 3 ? r.substr(adminOk_ ? 3 : 5) : r;
+    if (adminJob_ == 1 && adminOk_) confirmedHidden_ = true;
+    if (adminJob_ == 3) {
+        if (!adminOk_) adminResult_ += " Start with Windows is on, but the GameSir may become player 2.";
+        startBackgroundNow();  // after the player-1 helper exists
+    }
+    adminJob_ = 0;
+}
+
+void App::drawOneClickSetup() {
+    std::string err;
+    const bool busy = adminJob_ != 0;
+    auto run = [&](int job, const char* script, const char* args) {
+        if (startAdminScript(script, args, &err)) {
+            adminJob_ = job;
+            adminOk_ = true;
+            adminResult_ = "Waiting for the Windows admin prompt (click Yes)...";
+            return true;
+        }
+        adminOk_ = false;
+        adminResult_ = err;
+        return false;
+    };
+    if (busy) ImGui::BeginDisabled();
+    if (ImGui::Button("Hide controller from games")) run(1, "hidhide-setup.ps1", "-Mode hide");
+    ImGui::SameLine();
+    if (ImGui::Button("Unhide")) run(2, "hidhide-setup.ps1", "-Mode unhide");
+    ImGui::SameLine();
+    helpMarker("Needs HidHide installed. Hide: lets gsmacro read the controller, hides the DualSense / GameSir from games "
+               "(so a game sees only gsmacro's virtual pad - no second player, no double input) and turns hiding on. One admin "
+               "prompt; close HidHide's own window first; replug the controller once afterwards. Unhide gives the controller "
+               "back to games. Nothing else is changed.");
+
+    if (!autostartChecked_) {
+        autostartOn_ = autostartEntryPresent();
+        autostartChecked_ = true;
+    }
+    bool on = autostartOn_;
+    if (ImGui::Checkbox("Start with Windows (in the background)", &on)) {
+        if (!setAutostartEntry(on, &err)) {
+            adminOk_ = false;
+            adminResult_ = err;
+        } else if ((autostartOn_ = on)) {
+            const bool needTask = cfg_.settings.controller != ControllerType::DualSense && !slot0TaskRegistered();
+            if (!needTask || !run(3, "setup-autostart.ps1", "")) {
+                if (needTask) adminResult_ += " Start with Windows is on, but the GameSir may become player 2.";
+                else { adminOk_ = true; adminResult_ = "Start with Windows is on. gsmacro is now also running in the background (tray icon)."; }
+                startBackgroundNow();
+            }
+        } else {
+            adminOk_ = true;
+            adminResult_ = "Start with Windows is off. This copy keeps running until you exit it (tray icon > Exit).";
+        }
+    }
+    ImGui::SameLine();
+    helpMarker("At every login gsmacro starts by itself with only a tray icon, starts Live Mode, and arms the macros only while "
+               "Rocket League runs. Turning it on also starts that right now. With a GameSir it asks once for admin rights to "
+               "set up the player-1 helper. Untick to stop starting with Windows.");
+    if (busy) ImGui::EndDisabled();
+    if (!adminResult_.empty()) {
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextColored(adminOk_ ? kOkV : kWarnV, "%s", adminResult_.c_str());
+        ImGui::PopTextWrapPos();
     }
 }
 

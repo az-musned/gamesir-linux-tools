@@ -17,6 +17,7 @@
 #include <cwchar>
 
 #include <cstdio>
+#include <cstring>
 
 #include "../../app/platform.h"
 #include "dualsense_source.h"
@@ -260,6 +261,110 @@ bool runSlot0Task(std::string* err) {
         return false;
     }
     return true;
+}
+
+// ───────────────────────── one-click setup ─────────────────────────
+
+static std::wstring exeDirW() {
+    wchar_t b[MAX_PATH];
+    DWORD n = GetModuleFileNameW(nullptr, b, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return L".";
+    wchar_t* slash = wcsrchr(b, L'\\');
+    if (slash) *slash = 0;
+    return b;
+}
+
+static std::wstring adminLogPath() {
+    wchar_t t[MAX_PATH];
+    DWORD n = GetTempPathW(MAX_PATH, t);
+    return (n ? std::wstring(t) : std::wstring(L".\\")) + L"gsmacro-admin.log";
+}
+
+std::string bundledConfigPath() { return narrow(exeDirW() + L"\\gsmacro.cfg"); }
+
+static HANDLE g_adminProc = nullptr;
+
+bool startAdminScript(const char* scriptName, const std::string& args, std::string* err) {
+    if (g_adminProc) { *err = "Another admin step is still running."; return false; }
+    std::wstring script = exeDirW() + L"\\" + widen(scriptName);
+    if (GetFileAttributesW(script.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        *err = std::string(scriptName) + " is missing next to gsmacro.exe (re-extract the ZIP).";
+        return false;
+    }
+    DeleteFileW(adminLogPath().c_str());  // never show an old result
+    std::wstring params = L"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + L"\" -Quiet " + widen(args);
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof sei;
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"runas";
+    sei.lpFile = L"powershell.exe";
+    sei.lpParameters = params.c_str();
+    sei.nShow = SW_HIDE;
+    if (!ShellExecuteExW(&sei) || !sei.hProcess) {
+        *err = GetLastError() == ERROR_CANCELLED ? "The admin prompt was cancelled - nothing was changed."
+                                                 : "Could not start PowerShell as administrator.";
+        return false;
+    }
+    g_adminProc = sei.hProcess;
+    return true;
+}
+
+int pollAdminScript(std::string* result) {
+    if (!g_adminProc) return 0;
+    if (WaitForSingleObject(g_adminProc, 0) == WAIT_TIMEOUT) return 1;
+    CloseHandle(g_adminProc);
+    g_adminProc = nullptr;
+    *result = "fail The admin step ended without reporting a result.";
+    FILE* f = _wfopen(adminLogPath().c_str(), L"rb");
+    if (f) {
+        char line[1024];
+        while (fgets(line, sizeof line, f)) {
+            char* p = line;
+            if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) p += 3;  // UTF-8 BOM
+            if (strncmp(p, "RESULT ", 7) == 0) {
+                std::string r = p + 7;
+                while (!r.empty() && (r.back() == '\n' || r.back() == '\r')) r.pop_back();
+                *result = r;
+            }
+        }
+        fclose(f);
+    }
+    return 2;
+}
+
+static const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+bool autostartEntryPresent() {
+    return RegGetValueW(HKEY_CURRENT_USER, kRunKey, L"gsmacro", RRF_RT_REG_SZ, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+}
+
+bool setAutostartEntry(bool on, std::string* err) {
+    LSTATUS r;
+    if (on) {
+        std::wstring v = L"\"" + exeDirW() + L"\\gsmacro.exe\" --autostart";
+        r = RegSetKeyValueW(HKEY_CURRENT_USER, kRunKey, L"gsmacro", REG_SZ, v.c_str(), (DWORD)((v.size() + 1) * sizeof(wchar_t)));
+    } else {
+        r = RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, L"gsmacro");
+        if (r == ERROR_FILE_NOT_FOUND) r = ERROR_SUCCESS;
+    }
+    if (r != ERROR_SUCCESS) {
+        *err = "Could not change the Windows startup entry (error " + std::to_string((long)r) + ").";
+        return false;
+    }
+    return true;
+}
+
+bool slot0TaskRegistered() {
+    wchar_t cmd[] = L"schtasks.exe /query /tn \"gsmacro slot0\"";
+    STARTUPINFOW si{};
+    si.cb = sizeof si;
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, cmd, nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return false;
+    DWORD code = 1;
+    if (WaitForSingleObject(pi.hProcess, 10000) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return code == 0;
 }
 
 }  // namespace gsm

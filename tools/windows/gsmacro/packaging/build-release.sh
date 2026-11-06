@@ -40,7 +40,7 @@ mkdir -p "$PKG/examples" "$PKG/docs" "$PKG/licenses" "$PKG/diagnostics/gsprobe" 
 cp "$WORK/build/gsmacro.exe" "$WORK/build/gsm_bench.exe" "$WORK/build/gsm_tests.exe" "$WORK/ViGEmClient.dll" "$PKG/"
 cp "$HERE"/config/examples/*.cfg "$PKG/examples/"
 cp "$HERE/README.md" "$PKG/README.md"
-cp "$HERE/packaging/start-gsmacro-slot0.ps1" "$HERE/packaging/setup-autostart.ps1" "$PKG/"
+cp "$HERE/packaging/start-gsmacro-slot0.ps1" "$HERE/packaging/setup-autostart.ps1" "$HERE/packaging/hidhide-setup.ps1" "$PKG/"
 cp "$HERE"/docs/SETUP.md "$HERE"/docs/HARDWARE-CHECKLIST.md "$HERE"/docs/BENCHMARKING.md "$PKG/docs/"
 cp "$HERE"/docs/screenshots/*.png "$PKG/screenshots/" 2>/dev/null || true
 cp "$WORK/gsprobe.exe" "$REPO"/tools/windows/gsprobe/{inspect.ps1,run-tests.ps1,README.md} "$PKG/diagnostics/gsprobe/"

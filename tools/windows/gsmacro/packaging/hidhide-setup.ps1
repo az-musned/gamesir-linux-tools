@@ -36,11 +36,13 @@ try {
         Finish $false 'Close the HidHide Configuration Client window first, then try again.'
     }
     $exe = Join-Path $PSScriptRoot 'gsmacro.exe'
-    $ids = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
+    $devs = @(Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
         $_.InstanceId -match '^HID\\VID_054C&PID_(0CE6|0DF2)&MI_03\\' -or   # DualSense / Edge, USB
         $_.InstanceId -match '^HID\\VID_3537&PID_103D&IG_' -or                # GameSir game-controller HID
         $_.InstanceId -match '^USB\\VID_3537&PID_103D&MI_00\\'                # GameSir XInput interface
-    } | Select-Object -ExpandProperty InstanceId
+    })
+    $ids = @($devs | Select-Object -ExpandProperty InstanceId)
+    $present = @($devs | Where-Object { $_.Status -eq 'OK' } | Select-Object -ExpandProperty InstanceId)
     if (-not $ids) { Finish $false 'No DualSense or GameSir was found. Plug the controller in by USB and try again.' }
     $a = @()
     if ($Mode -eq 'hide') {
@@ -50,15 +52,32 @@ try {
     } else {
         foreach ($i in $ids) { $a += '--dev-unhide', "`"$i`"" }
     }
-    foreach ($i in $ids) { "  device $i" | Add-Content $log -Encoding utf8 }
+    foreach ($d in $devs) { "  device $($d.Status) $($d.InstanceId)" | Add-Content $log -Encoding utf8 }
     $p = Start-Process -FilePath $cli -ArgumentList $a -Wait -PassThru -WindowStyle Hidden
     "  HidHideCLI exit=$($p.ExitCode)" | Add-Content $log -Encoding utf8
     if ($p.ExitCode -ne 0) { Finish $false "HidHide refused the change (exit code $($p.ExitCode))." }
-    $n = @($ids).Count
+
+    # Check what HidHide actually has now (it may skip entries for pads that aren't plugged in).
+    $listed = @(& $cli --dev-list | ForEach-Object { if ($_ -match '"([^"]+)"') { $Matches[1] } })
+    $listed | ForEach-Object { "  hidden-list $_" | Add-Content $log -Encoding utf8 }
+    $hidden = @($ids | Where-Object { $listed -contains $_ })
+    function Names($list) {
+        $n = @()
+        if ($list | Where-Object { $_ -match 'VID_054C' }) { $n += 'DualSense' }
+        if ($list | Where-Object { $_ -match 'VID_3537&PID_103D&IG_' }) { $n += 'GameSir' }
+        if ($list | Where-Object { $_ -match 'VID_3537&PID_103D&MI_00' }) { $n += 'GameSir XInput' }
+        if ($n) { $n -join ', ' } else { 'nothing' }
+    }
+    $hasGameSir = [bool]($present | Where-Object { $_ -match 'VID_3537' })
+    $note = if ($hasGameSir) { '' } else { ' GameSir not plugged in: plug it in and click Hide again to hide it too.' }
     if ($Mode -eq 'hide') {
-        Finish $true "Done: $n controller entries hidden from games, gsmacro allowed. Replug the controller (or restart the game) once."
+        $missing = @($present | Where-Object { $listed -notcontains $_ })
+        if ($missing) { Finish $false "HidHide did not take: $(Names $missing). Close HidHide's window and try again." }
+        if (-not $hidden) { Finish $false "Nothing was hidden (plug the controller in by USB first).$note" }
+        Finish $true "Done. Hidden from games: $(Names $hidden). Replug the controller once.$note"
     } else {
-        Finish $true "Done: $n controller entries visible to games again. Replug the controller (or restart the game) once."
+        if ($hidden) { Finish $false "Still hidden: $(Names $hidden). Close HidHide's window and try again." }
+        Finish $true 'Done. Controllers are visible to games again. Replug the controller once.'
     }
 } catch {
     Finish $false "Failed: $($_.Exception.Message)"

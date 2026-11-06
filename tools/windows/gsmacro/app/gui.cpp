@@ -1665,28 +1665,38 @@ void App::pollAdmin() {
     if (!adminJob_) return;
     std::string r;
     if (pollAdminScript(&r) != 2) return;
-    adminOk_ = r.rfind("ok", 0) == 0;
-    adminResult_ = r.size() > 3 ? r.substr(adminOk_ ? 3 : 5) : r;
-    if (adminJob_ == 1 && adminOk_) confirmedHidden_ = true;
+    const int area = adminJob_ == 3 ? 1 : 0;
+    const bool ok = r.rfind("ok", 0) == 0;
+    adminOk_[area] = ok;
+    adminResult_[area] = r.size() > 3 ? r.substr(ok ? 3 : 5) : r;
+    if (adminJob_ == 1 && ok) confirmedHidden_ = true;
     if (adminJob_ == 3) {
-        if (!adminOk_) adminResult_ += " Start with Windows is on, but the GameSir may become player 2.";
+        if (!ok) adminResult_[1] += " Start with Windows is on, but the GameSir may become player 2.";
         startBackgroundNow();  // after the player-1 helper exists
     }
     adminJob_ = 0;
+}
+
+void App::adminMessage(int area) {
+    if (adminResult_[area].empty()) return;
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(adminOk_[area] ? kOkV : kWarnV, "%s", adminResult_[area].c_str());
+    ImGui::PopTextWrapPos();
 }
 
 void App::drawOneClickSetup() {
     std::string err;
     const bool busy = adminJob_ != 0;
     auto run = [&](int job, const char* script, const char* args) {
+        const int area = job == 3 ? 1 : 0;
         if (startAdminScript(script, args, &err)) {
             adminJob_ = job;
-            adminOk_ = true;
-            adminResult_ = "Waiting for the Windows admin prompt (click Yes)...";
+            adminOk_[area] = true;
+            adminResult_[area] = "Waiting for the Windows admin prompt (click Yes)...";
             return true;
         }
-        adminOk_ = false;
-        adminResult_ = err;
+        adminOk_[area] = false;
+        adminResult_[area] = err;
         return false;
     };
     if (busy) ImGui::BeginDisabled();
@@ -1698,6 +1708,7 @@ void App::drawOneClickSetup() {
                "(so a game sees only gsmacro's virtual pad - no second player, no double input) and turns hiding on. One admin "
                "prompt; close HidHide's own window first; replug the controller once afterwards. Unhide gives the controller "
                "back to games. Nothing else is changed.");
+    adminMessage(0);
 
     if (!autostartChecked_) {
         autostartOn_ = autostartEntryPresent();
@@ -1706,18 +1717,21 @@ void App::drawOneClickSetup() {
     bool on = autostartOn_;
     if (ImGui::Checkbox("Start with Windows (in the background)", &on)) {
         if (!setAutostartEntry(on, &err)) {
-            adminOk_ = false;
-            adminResult_ = err;
+            adminOk_[1] = false;
+            adminResult_[1] = err;
         } else if ((autostartOn_ = on)) {
             const bool needTask = cfg_.settings.controller != ControllerType::DualSense && !slot0TaskRegistered();
             if (!needTask || !run(3, "setup-autostart.ps1", "")) {
-                if (needTask) adminResult_ += " Start with Windows is on, but the GameSir may become player 2.";
-                else { adminOk_ = true; adminResult_ = "Start with Windows is on. gsmacro is now also running in the background (tray icon)."; }
+                if (needTask) adminResult_[1] += " Start with Windows is on, but the GameSir may become player 2.";
+                else {
+                    adminOk_[1] = true;
+                    adminResult_[1] = "Start with Windows is on. gsmacro is now also running in the background (tray icon).";
+                }
                 startBackgroundNow();
             }
         } else {
-            adminOk_ = true;
-            adminResult_ = "Start with Windows is off. This copy keeps running until you exit it (tray icon > Exit).";
+            adminOk_[1] = true;
+            adminResult_[1] = "Start with Windows is off. This copy keeps running until you exit it (tray icon > Exit).";
         }
     }
     ImGui::SameLine();
@@ -1725,11 +1739,7 @@ void App::drawOneClickSetup() {
                "Rocket League runs. Turning it on also starts that right now. With a GameSir it asks once for admin rights to "
                "set up the player-1 helper. Untick to stop starting with Windows.");
     if (busy) ImGui::EndDisabled();
-    if (!adminResult_.empty()) {
-        ImGui::PushTextWrapPos(0);
-        ImGui::TextColored(adminOk_ ? kOkV : kWarnV, "%s", adminResult_.c_str());
-        ImGui::PopTextWrapPos();
-    }
+    adminMessage(1);
 }
 
 }  // namespace gsm

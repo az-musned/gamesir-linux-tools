@@ -81,6 +81,7 @@ private:
     void drawSyncSettings();
     void drawOneClickSetup();
     void pollAdmin();
+    void adminMessage(int area);
     void drawConfigFile();
     void drawDiagnostics();
     void drawSetupWindow();
@@ -140,8 +141,9 @@ private:
     bool autostart_ = false;
     // One-click setup: 0 none, 1 hide, 2 unhide, 3 autostart helper task.
     int adminJob_ = 0;
-    bool adminOk_ = false;
-    std::string adminResult_;
+    // Result lines: [0] Hide/Unhide, [1] Start with Windows.
+    bool adminOk_[2] = {false, false};
+    std::string adminResult_[2];
     bool autostartOn_ = false, autostartChecked_ = false;
     Time nextLiveTry_ = 0, nextGameCheck_ = 0;
     int gameRunning_ = -1;  // -1 unknown, 0/1

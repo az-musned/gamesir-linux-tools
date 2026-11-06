@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "../core/backend.h"
+#include "../core/config.h"
 
 namespace gsm {
 
@@ -19,8 +20,9 @@ struct LiveBackends {
     std::unique_ptr<IOutputSink> output;
 };
 bool liveBackendsAvailable();             // compiled in (Windows build)
-// Creates (but does not open) the XInput source + ViGEm sink. Returns "" or an error.
-std::string createLiveBackends(LiveBackends* out);
+// Creates (but does not open) the input source for this controller type
+// (GameSir: XInput; DualSense: USB HID) + the ViGEm sink. Returns "" or an error.
+std::string createLiveBackends(LiveBackends* out, ControllerType controller = ControllerType::GameSir);
 
 // ── read-only checks for the setup wizard ──
 struct CheckResult {

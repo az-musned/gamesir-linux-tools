@@ -22,7 +22,7 @@ std::string defaultConfigPath() {
 }
 
 bool liveBackendsAvailable() { return false; }
-std::string createLiveBackends(LiveBackends*) { return "Live mode needs the Windows build (XInput + ViGEmBus)."; }
+std::string createLiveBackends(LiveBackends*, ControllerType) { return "Live mode needs the Windows build (XInput + ViGEmBus)."; }
 
 static CheckResult na(const char* what) {
     CheckResult r;

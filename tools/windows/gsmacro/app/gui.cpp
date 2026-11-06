@@ -147,7 +147,7 @@ void App::startLive(bool quiet) {
     confirmedPassthrough_ = false;
     selfMatch_ = selfMismatch_ = 0;
     LiveBackends lb;
-    std::string err = createLiveBackends(&lb);
+    std::string err = createLiveBackends(&lb, cfg_.settings.controller);
     if (err.empty()) {
         live_ = std::move(lb);
         if (engine_->start(live_.input.get(), live_.output.get(), std::make_shared<const Config>(cfg_), &err)) {
@@ -197,7 +197,9 @@ void App::backgroundTick() {
     if (mode_ != Mode::Live) {
         if (now < nextLiveTry_) return;
         if (boot_ == Boot::Start) {
-            if (gameSirXusbState() >= 0) {  // present (running, or already disabled): let the task handle it
+            // Only the GameSir is an XInput pad that can hold slot 0; a DualSense
+            // (raw HID) never takes an XInput slot, so nothing needs freeing.
+            if (cfg_.settings.controller == ControllerType::GameSir && gameSirXusbState() >= 0) {
                 std::string err;
                 if (runSlot0Task(&err)) {
                     boot_ = Boot::WaitOff;
@@ -513,8 +515,12 @@ void App::drawStatusStrip() {
         chip("Controller: mock (Demo)", kPhys, "Demo Mode uses a simulated controller.");
         chip("Virtual pad: none", kDim, "Demo Mode never creates a virtual device.");
     } else {
-        chip(snap_.input.connected ? "GameSir connected" : "GameSir NOT found - check cable / PC mode", snap_.input.connected ? kOk : kBlocked,
-             "Physical controller read through XInput (VID 3537).");
+        if (cfg_.settings.controller == ControllerType::DualSense)
+            chip(snap_.input.connected ? "DualSense connected (USB)" : "DualSense NOT found - connect it by USB cable",
+                 snap_.input.connected ? kOk : kBlocked, "Physical controller read as raw HID (Sony 054C:0CE6/0DF2), event-driven.");
+        else
+            chip(snap_.input.connected ? "GameSir connected" : "GameSir NOT found - check cable / PC mode", snap_.input.connected ? kOk : kBlocked,
+                 "Physical controller read through XInput (VID 3537).");
         if (virtualSlot_ >= 0) snprintf(b, sizeof b, "Virtual Xbox 360 pad: XInput slot %d", virtualSlot_);
         else snprintf(b, sizeof b, "Virtual Xbox 360 pad: created (slot pending)");
         chip(b, snap_.submitFailures ? kBlocked : kOk, "Created through ViGEmBus. Removed when Live Mode stops or gsmacro closes.");
@@ -1263,6 +1269,12 @@ void App::drawSyncSettings() {
     if (ImGui::SliderInt("FIFO queue", &qc, 0, MacroScheduler::kMaxQueue)) { s.queueCapacity = qc; c = true; }
     helpMarker("Activations allowed to wait behind the running macro (0 = presses during a macro are ignored). Extra presses are "
                "dropped and counted in Diagnostics. Macros never overlap.");
+    int ct = (int)s.controller;
+    const char* ctNames[] = {"GameSir (XInput)", "DualSense (USB)"};
+    if (ImGui::Combo("Controller", &ct, ctNames, 2)) { s.controller = (ControllerType)ct; c = true; }
+    helpMarker("Which physical controller Live Mode reads. Takes effect the next time Live Mode starts (Stop, then Start Live "
+               "Mode). DualSense: USB cable only; touchpad click = Back/View (Rocket League scoreboard). Hide it in HidHide's "
+               "Devices tab like the GameSir.");
     int co = (int)s.chordOrder;
     const char* coNames[] = {"hold bumper, tap chord button", "hold chord button (shift), tap bumper"};
     if (ImGui::Combo("Trigger order", &co, coNames, 2)) { s.chordOrder = (ChordOrder)co; c = true; }

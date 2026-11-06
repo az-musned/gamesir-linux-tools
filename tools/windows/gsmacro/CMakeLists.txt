@@ -32,6 +32,7 @@ add_library(gsm_core STATIC
   core/processor.cpp
   core/engine.cpp
   core/edge_timeline.cpp
+  core/dualsense.cpp
   backends/demo_scenarios.cpp)
 target_include_directories(gsm_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(gsm_core PUBLIC Threads::Threads)
@@ -41,17 +42,18 @@ if(WIN32)
   add_library(gsm_win STATIC
     backends/win/xinput_source.cpp
     backends/win/xinput_util.cpp
+    backends/win/dualsense_source.cpp
     backends/win/vigem_sink.cpp
     backends/win/hidhide_status.cpp
     backends/win/win_waiter.cpp
     backends/win/win_platform.cpp)
-  target_link_libraries(gsm_win PUBLIC gsm_core advapi32 avrt shell32 ole32 comdlg32 cfgmgr32)
+  target_link_libraries(gsm_win PUBLIC gsm_core advapi32 avrt shell32 ole32 comdlg32 cfgmgr32 hid setupapi)
   target_compile_definitions(gsm_win PUBLIC UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
 # ── tests ──
 if(GSM_BUILD_TESTS)
-  add_executable(gsm_tests tests/test_main.cpp tests/test_core.cpp tests/test_engine.cpp tests/test_edge_cases.cpp tests/test_edge_timeline.cpp)
+  add_executable(gsm_tests tests/test_main.cpp tests/test_core.cpp tests/test_engine.cpp tests/test_edge_cases.cpp tests/test_edge_timeline.cpp tests/test_dualsense.cpp)
   target_link_libraries(gsm_tests PRIVATE gsm_core)
   target_compile_definitions(gsm_tests PRIVATE GSM_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   if(WIN32)

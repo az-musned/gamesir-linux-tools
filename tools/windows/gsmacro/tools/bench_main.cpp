@@ -33,6 +33,8 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <mmsystem.h>  // timeBeginPeriod
+#include <condition_variable>
+#include "../backends/win/dualsense_source.h"
 #include "../backends/win/vigem_sink.h"
 #include "../backends/win/win_waiter.h"
 #include "../backends/win/xinput_source.h"
@@ -294,6 +296,58 @@ int runSlots() {
     return 0;
 }
 
+// Read-only: the DualSense source as Live Mode uses it, printing every decoded
+// button change (PlayStation names) and the stick/trigger extremes. No virtual pad.
+int runDualSense(const Args& a) {
+    double secs = a.num("-t", 30);
+    DualSenseSource src;
+    std::mutex m;
+    std::condition_variable cv;
+    uint64_t wakes = 0;
+    src.setWaker([&] { std::lock_guard<std::mutex> l(m); wakes++; cv.notify_one(); });
+    std::string err;
+    src.open(&err);
+    say("== gsm_bench ds5: DualSense (USB HID) decoded as gsmacro reads it, %.0f s (read-only, no virtual pad) ==\n", secs);
+    SteadyClock clock;
+    Time t0 = clock.now();
+    InputSample prev;
+    bool first = true;
+    int lxMin = 0, lxMax = 0, lyMin = 0, lyMax = 0, rxMin = 0, rxMax = 0, ryMin = 0, ryMax = 0, ltMax = 0, rtMax = 0;
+    uint64_t changes = 0;
+    while (clock.now() - t0 < ms(secs * 1000)) {
+        {
+            std::unique_lock<std::mutex> l(m);
+            cv.wait_for(l, std::chrono::milliseconds(200));
+        }
+        InputSample s;
+        src.read(&s);
+        double at = toMs(clock.now() - t0) / 1000.0;
+        if (first || s.connected != prev.connected) say("  %7.2fs  %s\n", at, s.connected ? "DualSense connected" : "DualSense NOT connected");
+        if (s.connected) {
+            uint16_t down = (uint16_t)(s.state.buttons & ~prev.state.buttons), up = (uint16_t)(~s.state.buttons & prev.state.buttons);
+            for (int b = 0; b < 16; b++) {
+                if (down & (1u << b)) say("  %7.2fs  %-10s down\n", at, buttonName((uint16_t)(1u << b)));
+                if (up & (1u << b)) say("  %7.2fs  %-10s up\n", at, buttonName((uint16_t)(1u << b)));
+            }
+            const GamepadState& g = s.state;
+            lxMin = std::min(lxMin, (int)g.lx); lxMax = std::max(lxMax, (int)g.lx);
+            lyMin = std::min(lyMin, (int)g.ly); lyMax = std::max(lyMax, (int)g.ly);
+            rxMin = std::min(rxMin, (int)g.rx); rxMax = std::max(rxMax, (int)g.rx);
+            ryMin = std::min(ryMin, (int)g.ry); ryMax = std::max(ryMax, (int)g.ry);
+            ltMax = std::max(ltMax, (int)g.lt); rtMax = std::max(rtMax, (int)g.rt);
+        }
+        if (s.seq != prev.seq) changes += s.seq - prev.seq;
+        prev = s;
+        first = false;
+    }
+    double el = toMs(clock.now() - t0) / 1000.0;
+    src.close();
+    say("  state changes %llu (%.0f/s), engine wakes requested %llu\n", (unsigned long long)changes, changes / el, (unsigned long long)wakes);
+    say("  LX %d..%d  LY %d..%d (+ = up)  RX %d..%d  RY %d..%d  L2 max %d  R2 max %d\n", lxMin, lxMax, lyMin, lyMax, rxMin, rxMax,
+        ryMin, ryMax, ltMax, rtMax);
+    return 0;
+}
+
 int runPoll(const Args& a) {
     double secs = a.num("-t", 20);
     SteadyClock clock;
@@ -462,6 +516,7 @@ void usage() {
     say("gsm_bench - software timing measurements (NOT input-to-game latency)\n"
         "  gsm_bench mock    [--samples N] [--runs N]\n"
         "  gsm_bench slots\n"
+        "  gsm_bench ds5     [-t S]          (DualSense over USB, decoded, read-only)\n"
         "  gsm_bench poll    [-t S] [--period-us U]\n"
         "  gsm_bench capture (--slot N | --vid HEX [--pid HEX]) [-t S] [--period-us U] [--csv F] [--ignore L1,R1,Square|none]\n"
         "  gsm_bench live    --allow-virtual-pad [-t S] [--trigger N] [--config F]\n"
@@ -493,6 +548,7 @@ int main(int argc, char** argv) {
     if (mode == "mock") rc = runMock(a);
 #ifdef _WIN32
     else if (mode == "slots") rc = runSlots();
+    else if (mode == "ds5") rc = runDualSense(a);
     else if (mode == "poll") rc = runPoll(a);
     else if (mode == "capture") rc = runCapture(a);
     else if (mode == "live") rc = runLive(a);

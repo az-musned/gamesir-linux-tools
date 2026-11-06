@@ -25,6 +25,11 @@ const char* bothBumpersName(BothBumpers b);
 enum class ChordOrder : uint8_t { BumperFirst, ShiftFirst };
 const char* chordOrderName(ChordOrder o);
 
+// Physical controller Live Mode reads. GameSir: XInput (VID 3537), polled.
+// DualSense: Sony DualSense / Edge over USB, raw HID, event-driven.
+enum class ControllerType : uint8_t { GameSir, DualSense };
+const char* controllerTypeName(ControllerType c);
+
 struct Settings {
     // Input sampling. Used by polled sources (XInput). Event-driven sources
     // wake the engine directly and this is only a safety net.
@@ -42,6 +47,7 @@ struct Settings {
     // same sample while the shift is held; Latest then means left).
     BothBumpers bothBumpers = BothBumpers::Latest;
     ChordOrder chordOrder = ChordOrder::BumperFirst;
+    ControllerType controller = ControllerType::GameSir;
     bool leftEnabled = true, rightEnabled = true;
     // Master switch. Off = pure passthrough (Square always passes, no chord
     // macros). Live Mode starts with this off until passthrough is verified.

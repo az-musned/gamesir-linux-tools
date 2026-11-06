@@ -73,6 +73,22 @@ virtual pad sits in slot 1 and games treat it as **player 2**. Start Live
 Mode **before** plugging the pad in (or unplug it, Start Live Mode, replug):
 the virtual pad then takes slot 0.
 
+## Using a DualSense instead of the GameSir
+
+Set `controller = dualsense` in `%APPDATA%\gsmacro\gsmacro.cfg` (or Settings >
+Controller, then Stop/Start Live Mode). The macros and chord work unchanged.
+
+* USB cable only (Bluetooth uses a different report format).
+* Read as raw HID and event-driven: every report (250/s on the test PC) wakes
+  the engine at once; no XInput polling. It reconnects by itself.
+* Mapping: Square/Cross/Circle/Triangle = X/A/B/Y, Create = Back,
+  Options = Start, PS = Guide, touchpad click = Back/View (Rocket League
+  scoreboard). Mute and touch position are not used.
+* Hide it from games in HidHide's Devices tab ("DualSense Wireless
+  Controller"); no CLI step is needed (it has no XInput interface), and it never
+  takes an XInput slot, so the virtual pad is player 1 without any slot handling.
+* `gsm_bench ds5 -t 30` shows what gsmacro decodes (read-only, no virtual pad).
+
 ## Run in the background at login (no clicks)
 
 Run `setup-autostart.ps1` once (one admin prompt). From the next login on,

@@ -19,6 +19,7 @@
 #include <cstdio>
 
 #include "../../app/platform.h"
+#include "dualsense_source.h"
 #include "hidhide_status.h"
 #include "vigem_sink.h"
 #include "win_waiter.h"
@@ -68,8 +69,9 @@ std::string defaultConfigPath() {
 
 bool liveBackendsAvailable() { return true; }
 
-std::string createLiveBackends(LiveBackends* out) {
-    out->input = std::make_unique<XInputSource>();
+std::string createLiveBackends(LiveBackends* out, ControllerType controller) {
+    if (controller == ControllerType::DualSense) out->input = std::make_unique<DualSenseSource>();
+    else out->input = std::make_unique<XInputSource>();
     out->output = std::make_unique<ViGEmSink>();
     return "";
 }

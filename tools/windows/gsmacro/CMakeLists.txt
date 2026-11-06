@@ -33,6 +33,7 @@ add_library(gsm_core STATIC
   core/engine.cpp
   core/edge_timeline.cpp
   core/dualsense.cpp
+  core/merged_source.cpp
   backends/demo_scenarios.cpp)
 target_include_directories(gsm_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(gsm_core PUBLIC Threads::Threads)
@@ -53,7 +54,7 @@ endif()
 
 # ── tests ──
 if(GSM_BUILD_TESTS)
-  add_executable(gsm_tests tests/test_main.cpp tests/test_core.cpp tests/test_engine.cpp tests/test_edge_cases.cpp tests/test_edge_timeline.cpp tests/test_dualsense.cpp)
+  add_executable(gsm_tests tests/test_main.cpp tests/test_core.cpp tests/test_engine.cpp tests/test_edge_cases.cpp tests/test_edge_timeline.cpp tests/test_dualsense.cpp tests/test_merged.cpp)
   target_link_libraries(gsm_tests PRIVATE gsm_core)
   target_compile_definitions(gsm_tests PRIVATE GSM_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   if(WIN32)

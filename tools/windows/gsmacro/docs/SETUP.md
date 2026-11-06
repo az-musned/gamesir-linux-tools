@@ -73,10 +73,15 @@ virtual pad sits in slot 1 and games treat it as **player 2**. Start Live
 Mode **before** plugging the pad in (or unplug it, Start Live Mode, replug):
 the virtual pad then takes slot 0.
 
-## Using a DualSense instead of the GameSir
+## Using a DualSense (or both)
 
-Set `controller = dualsense` in `%APPDATA%\gsmacro\gsmacro.cfg` (or Settings >
-Controller, then Stop/Start Live Mode). The macros and chord work unchanged.
+`controller = auto` (the default, also when the setting is missing) reads the
+GameSir and a DualSense at the same time: plug in either one and it works,
+with no restart and no setting to change. With both plugged in they act as one
+controller (buttons combined; each stick and trigger from the pad pushing it
+further). `controller = gamesir` or `controller = dualsense` restricts it to
+one pad (Settings > Controller, then Stop/Start Live Mode). The macros and
+chord work unchanged.
 
 * USB cable only (Bluetooth uses a different report format).
 * Read as raw HID and event-driven: every report (250/s on the test PC) wakes

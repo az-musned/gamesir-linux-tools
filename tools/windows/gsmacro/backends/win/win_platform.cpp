@@ -20,6 +20,7 @@
 
 #include "../../app/platform.h"
 #include "dualsense_source.h"
+#include "../../core/merged_source.h"
 #include "hidhide_status.h"
 #include "vigem_sink.h"
 #include "win_waiter.h"
@@ -71,6 +72,8 @@ bool liveBackendsAvailable() { return true; }
 
 std::string createLiveBackends(LiveBackends* out, ControllerType controller) {
     if (controller == ControllerType::DualSense) out->input = std::make_unique<DualSenseSource>();
+    else if (controller == ControllerType::Auto)
+        out->input = std::make_unique<MergedSource>(std::make_unique<XInputSource>(), std::make_unique<DualSenseSource>());
     else out->input = std::make_unique<XInputSource>();
     out->output = std::make_unique<ViGEmSink>();
     return "";

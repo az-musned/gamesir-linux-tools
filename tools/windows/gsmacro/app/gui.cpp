@@ -9,6 +9,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "../core/merged_source.h"
 
 namespace gsm {
 
@@ -199,7 +200,7 @@ void App::backgroundTick() {
         if (boot_ == Boot::Start) {
             // Only the GameSir is an XInput pad that can hold slot 0; a DualSense
             // (raw HID) never takes an XInput slot, so nothing needs freeing.
-            if (cfg_.settings.controller == ControllerType::GameSir && gameSirXusbState() >= 0) {
+            if (cfg_.settings.controller != ControllerType::DualSense && gameSirXusbState() >= 0) {
                 std::string err;
                 if (runSlot0Task(&err)) {
                     boot_ = Boot::WaitOff;
@@ -515,7 +516,15 @@ void App::drawStatusStrip() {
         chip("Controller: mock (Demo)", kPhys, "Demo Mode uses a simulated controller.");
         chip("Virtual pad: none", kDim, "Demo Mode never creates a virtual device.");
     } else {
-        if (cfg_.settings.controller == ControllerType::DualSense)
+        if (cfg_.settings.controller == ControllerType::Auto) {
+            auto* m = dynamic_cast<MergedSource*>(live_.input.get());
+            bool g = m && m->firstConnected(), d = m && m->secondConnected();
+            const char* t = g && d ? "GameSir + DualSense connected" : g ? "GameSir connected" : d ? "DualSense connected (USB)"
+                                                                         : "No controller found - connect the GameSir or a DualSense (USB)";
+            chip(t, g || d ? kOk : kBlocked,
+                 "Controller = auto: reads the GameSir (XInput, VID 3537) and a DualSense (USB HID) at the same time; "
+                 "whichever is plugged in works, both together are merged.");
+        } else if (cfg_.settings.controller == ControllerType::DualSense)
             chip(snap_.input.connected ? "DualSense connected (USB)" : "DualSense NOT found - connect it by USB cable",
                  snap_.input.connected ? kOk : kBlocked, "Physical controller read as raw HID (Sony 054C:0CE6/0DF2), event-driven.");
         else
@@ -1270,10 +1279,10 @@ void App::drawSyncSettings() {
     helpMarker("Activations allowed to wait behind the running macro (0 = presses during a macro are ignored). Extra presses are "
                "dropped and counted in Diagnostics. Macros never overlap.");
     int ct = (int)s.controller;
-    const char* ctNames[] = {"GameSir (XInput)", "DualSense (USB)"};
-    if (ImGui::Combo("Controller", &ct, ctNames, 2)) { s.controller = (ControllerType)ct; c = true; }
-    helpMarker("Which physical controller Live Mode reads. Takes effect the next time Live Mode starts (Stop, then Start Live "
-               "Mode). DualSense: USB cable only; touchpad click = Back/View (Rocket League scoreboard). Hide it in HidHide's "
+    const char* ctNames[] = {"GameSir only (XInput)", "DualSense only (USB)", "Auto: GameSir or DualSense"};
+    if (ImGui::Combo("Controller", &ct, ctNames, 3)) { s.controller = (ControllerType)ct; c = true; }
+    helpMarker("Which physical controller Live Mode reads. Auto (default) reads both at once: whichever is plugged in works, "
+               "with no restart. Takes effect the next time Live Mode starts (Stop, then Start Live Mode). DualSense: USB cable only; touchpad click = Back/View (Rocket League scoreboard). Hide it in HidHide's "
                "Devices tab like the GameSir.");
     int co = (int)s.chordOrder;
     const char* coNames[] = {"hold bumper, tap chord button", "hold chord button (shift), tap bumper"};

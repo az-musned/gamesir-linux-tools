@@ -27,7 +27,8 @@ const char* chordOrderName(ChordOrder o);
 
 // Physical controller Live Mode reads. GameSir: XInput (VID 3537), polled.
 // DualSense: Sony DualSense / Edge over USB, raw HID, event-driven.
-enum class ControllerType : uint8_t { GameSir, DualSense };
+// Auto (default): both at once, merged; whichever is plugged in works.
+enum class ControllerType : uint8_t { GameSir, DualSense, Auto };
 const char* controllerTypeName(ControllerType c);
 
 struct Settings {
@@ -47,7 +48,7 @@ struct Settings {
     // same sample while the shift is held; Latest then means left).
     BothBumpers bothBumpers = BothBumpers::Latest;
     ChordOrder chordOrder = ChordOrder::BumperFirst;
-    ControllerType controller = ControllerType::GameSir;
+    ControllerType controller = ControllerType::Auto;
     bool leftEnabled = true, rightEnabled = true;
     // Master switch. Off = pure passthrough (Square always passes, no chord
     // macros). Live Mode starts with this off until passthrough is verified.

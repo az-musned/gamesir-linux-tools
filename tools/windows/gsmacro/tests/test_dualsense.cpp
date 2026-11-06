@@ -144,7 +144,7 @@ TEST("dualsense: the shift-first wall-dash chord works from DualSense input") {
     CHECK(o.has(BTN_A) && !o.has(BTN_RB) && !o.has(BTN_X));
 }
 
-TEST("config: controller round trip, default gamesir, ds5 alias, bad value rejected") {
+TEST("config: controller round trip, default auto, ds5 alias, bad value rejected") {
     Config c;
     c.settings.controller = ControllerType::DualSense;
     Config back;
@@ -152,6 +152,11 @@ TEST("config: controller round trip, default gamesir, ds5 alias, bad value rejec
     CHECK(configFromText(configToText(c), &back, &err));
     CHECK(back.settings.controller == ControllerType::DualSense);
     CHECK(configFromText("[settings]\npoll_period_us = 500\n", &back, &err));
+    CHECK(back.settings.controller == ControllerType::Auto);
+    c.settings.controller = ControllerType::Auto;
+    CHECK(configFromText(configToText(c), &back, &err));
+    CHECK(back.settings.controller == ControllerType::Auto);
+    CHECK(configFromText("[settings]\ncontroller = gamesir\n", &back, &err));
     CHECK(back.settings.controller == ControllerType::GameSir);
     CHECK(configFromText("[settings]\ncontroller = DS5\n", &back, &err));
     CHECK(back.settings.controller == ControllerType::DualSense);

@@ -20,7 +20,9 @@ const char* bothBumpersName(BothBumpers b) {
 }
 
 const char* chordOrderName(ChordOrder o) { return o == ChordOrder::ShiftFirst ? "shift_first" : "bumper_first"; }
-const char* controllerTypeName(ControllerType c) { return c == ControllerType::DualSense ? "dualsense" : "gamesir"; }
+const char* controllerTypeName(ControllerType c) {
+    return c == ControllerType::DualSense ? "dualsense" : c == ControllerType::Auto ? "auto" : "gamesir";
+}
 
 void sanitize(Settings* s) {
     s->pollPeriodUs = std::clamp(s->pollPeriodUs, 100.0, 16000.0);
@@ -184,7 +186,8 @@ bool configFromText(const std::string& text, Config* out, std::string* err) {
                 std::string l = lower(v);
                 if (l == "gamesir") s.controller = ControllerType::GameSir;
                 else if (l == "dualsense" || l == "ds5") s.controller = ControllerType::DualSense;
-                else return fail("controller must be gamesir|dualsense");
+                else if (l == "auto" || l == "both") s.controller = ControllerType::Auto;
+                else return fail("controller must be auto|gamesir|dualsense");
             } else if (k == "chord_button" || k == "left_modifier" || k == "right_modifier") {
                 uint16_t bit = buttonFromName(v);
                 if (!bit) return fail("unknown button '" + v + "'");

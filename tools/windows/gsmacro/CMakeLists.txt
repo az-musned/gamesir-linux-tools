@@ -77,7 +77,7 @@ if(GSM_BUILD_GUI)
   set(IMGUI ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
   set(IMGUI_CORE ${IMGUI}/imgui.cpp ${IMGUI}/imgui_draw.cpp ${IMGUI}/imgui_tables.cpp ${IMGUI}/imgui_widgets.cpp)
   if(WIN32)
-    add_executable(gsmacro WIN32 app/main_win32.cpp app/gui.cpp ${IMGUI_CORE}
+    add_executable(gsmacro WIN32 app/main_win32.cpp app/gui.cpp app/gsmacro.rc ${IMGUI_CORE}
       ${IMGUI}/backends/imgui_impl_win32.cpp ${IMGUI}/backends/imgui_impl_dx11.cpp)
     target_include_directories(gsmacro PRIVATE ${IMGUI} ${IMGUI}/backends)
     target_link_libraries(gsmacro PRIVATE gsm_win d3d11 dxgi d3dcompiler dwmapi)

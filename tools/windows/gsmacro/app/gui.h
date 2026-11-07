@@ -145,6 +145,8 @@ private:
     bool adminOk_[2] = {false, false};
     std::string adminResult_[2];
     bool autostartOn_ = false, autostartChecked_ = false;
+    bool pendingHideTried_ = false;  // installer's hide-pending flag, tried once per start
+    Time pendingHideAt_ = 0;
     Time nextLiveTry_ = 0, nextGameCheck_ = 0;
     int gameRunning_ = -1;  // -1 unknown, 0/1
     // Boot order: free slot 0 BEFORE Live Mode opens the GameSir through XInput.

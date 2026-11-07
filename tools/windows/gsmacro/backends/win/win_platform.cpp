@@ -354,6 +354,14 @@ bool setAutostartEntry(bool on, std::string* err) {
     return true;
 }
 
+bool hidePending() {
+    std::string cfg = defaultConfigPath();  // %APPDATA%\gsmacro\gsmacro.cfg
+    size_t slash = cfg.find_last_of('\\');
+    if (slash == std::string::npos) return false;
+    std::wstring flag = widen(cfg.substr(0, slash)) + L"\\hide-pending";
+    return GetFileAttributesW(flag.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
 bool slot0TaskRegistered() {
     wchar_t cmd[] = L"schtasks.exe /query /tn \"gsmacro slot0\"";
     STARTUPINFOW si{};

@@ -70,5 +70,9 @@ int pollAdminScript(std::string* result);
 bool autostartEntryPresent();
 bool setAutostartEntry(bool on, std::string* err);
 bool slot0TaskRegistered();                       // the "gsmacro slot0" scheduled task exists
+// The installer leaves %APPDATA%\gsmacro\hide-pending when it could not hide
+// the controller yet (no pad plugged in, or HidHide needs a restart first).
+// hidhide-setup.ps1 removes it once hiding worked.
+bool hidePending();
 
 }  // namespace gsm

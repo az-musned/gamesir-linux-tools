@@ -74,6 +74,8 @@ try {
         $missing = @($present | Where-Object { $listed -notcontains $_ })
         if ($missing) { Finish $false "HidHide did not take: $(Names $missing). Close HidHide's window and try again." }
         if (-not $hidden) { Finish $false "Nothing was hidden (plug the controller in by USB first).$note" }
+        # The installer leaves this flag so gsmacro finishes hiding later if needed; done now.
+        Remove-Item (Join-Path $env:APPDATA 'gsmacro\hide-pending') -Force -ErrorAction SilentlyContinue
         Finish $true "Done. Hidden from games: $(Names $hidden). Replug the controller once.$note"
     } else {
         if ($hidden) { Finish $false "Still hidden: $(Names $hidden). Close HidHide's window and try again." }

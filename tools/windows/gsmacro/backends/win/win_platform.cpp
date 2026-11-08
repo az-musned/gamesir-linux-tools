@@ -105,10 +105,10 @@ CheckResult checkController() {
     }
     for (auto& p : pads) {
         if (p.vid != 0x3537) continue;
-        r.state = p.pid == 0x103D ? CheckResult::Ok : CheckResult::Warn;
+        // Tarantula units report 103D or 10FF (firmware-dependent); both are PC/XInput mode.
+        r.state = CheckResult::Ok;
         snprintf(b, sizeof b, "GameSir found in XInput slot %d (%04X:%04X).", p.slot, p.vid, p.pid);
         r.text = b;
-        if (p.pid != 0x103D) r.guidance = "Expected PID 103D (PC/XInput mode). Hold Home + X for 2 s to switch the pad to PC mode.";
         return r;
     }
     r.state = CheckResult::Fail;
@@ -226,14 +226,15 @@ bool anyPadInSlot(int slot) {
 }
 
 int gameSirXusbState() {
-    const wchar_t* prefix = L"USB\\VID_3537&PID_103D&MI_00\\";
+    // Any GameSir product ID: the Tarantula reports 103D or 10FF depending on unit/firmware.
+    const wchar_t* prefix = L"USB\\VID_3537&PID_";
     ULONG len = 0;
     const ULONG flags = CM_GETIDLIST_FILTER_ENUMERATOR | CM_GETIDLIST_FILTER_PRESENT;
     if (CM_Get_Device_ID_List_SizeW(&len, L"USB", flags) != CR_SUCCESS || len == 0) return -1;
     std::wstring buf(len, L'\0');
     if (CM_Get_Device_ID_ListW(L"USB", &buf[0], len, flags) != CR_SUCCESS) return -1;
     for (const wchar_t* id = buf.c_str(); *id; id += wcslen(id) + 1) {
-        if (_wcsnicmp(id, prefix, wcslen(prefix)) != 0) continue;
+        if (_wcsnicmp(id, prefix, wcslen(prefix)) != 0 || !wcsstr(id, L"&MI_00\\")) continue;
         DEVINST dn;
         if (CM_Locate_DevNodeW(&dn, const_cast<wchar_t*>(id), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS) return 1;
         ULONG status = 0, problem = 0;

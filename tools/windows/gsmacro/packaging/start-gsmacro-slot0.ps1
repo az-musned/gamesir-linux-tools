@@ -38,7 +38,7 @@ function Slot0 {
 function GameSirParent {
     # The composite USB device (no MI_/IG_ part): disabling it removes every interface, like the cable.
     Get-PnpDevice -ErrorAction SilentlyContinue |
-        Where-Object { $_.InstanceId -match '^USB\\VID_3537&PID_103D\\[^&]+$' -and $_.Problem -ne 'CM_PROB_PHANTOM' } |
+        Where-Object { $_.InstanceId -match '^USB\\VID_3537&PID_[0-9A-F]{4}\\[^&]+$' -and $_.Problem -ne 'CM_PROB_PHANTOM' } |
         Select-Object -First 1
 }
 function PendingDisable($devId) {   # CONFIGFLAG_DISABLED stored (applies at boot even if the device runs now)
@@ -85,7 +85,7 @@ if ($Mode -eq 'cycle') {
         # Disable the XInput interface (MI_00), which is what holds the XInput slot; if that
         # fails, try the whole USB device (on the target PC Windows refuses the latter as a
         # "critical system device", which costs ~10 s, so it is only the fallback).
-        $xusbDev = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -like 'USB\VID_3537&PID_103D&MI_00\*' -and $_.Problem -ne 'CM_PROB_PHANTOM' } | Select-Object -First 1
+        $xusbDev = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -like 'USB\VID_3537&PID_*&MI_00\*' -and $_.Problem -ne 'CM_PROB_PHANTOM' } | Select-Object -First 1
         if ($xusbDev -and (IsDisabled $xusbDev)) {
             # Already off (e.g. a disable stored by an earlier run took effect at boot): just wait and re-enable.
             Log "XInput interface already disabled [$($xusbDev.InstanceId)] - using it as is"

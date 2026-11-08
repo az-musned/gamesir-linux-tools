@@ -473,7 +473,7 @@ void App::drawTopBar() {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("gsmacro");
     ImGui::SameLine();
-    ImGui::TextDisabled("GameSir Tarantula 3537:103D  -  controller-native macros");
+    ImGui::TextDisabled("GameSir (VID 3537) / DualSense  -  controller-native macros");
 
     // Right-aligned controls.
     const float w = 640 * scale_;

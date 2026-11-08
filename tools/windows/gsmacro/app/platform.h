@@ -32,7 +32,7 @@ struct CheckResult {
 };
 struct PadSlot { int slot = -1; uint16_t vid = 0, pid = 0; };
 std::vector<PadSlot> listXInputPads();            // connected XInput slots
-CheckResult checkController();                    // GameSir 3537:103D present in XInput?
+CheckResult checkController();                    // a GameSir (VID 3537) present in XInput?
 CheckResult checkViGEm();                         // ViGEmClient.dll + ViGEmBus reachable (no device created)
 CheckResult checkHidHide();                       // HidHide service state (never changes HidHide)
 int virtualPadSlot(LiveBackends* lb);             // XInput slot of our virtual pad, or -1
@@ -47,7 +47,8 @@ bool pickFile(bool save, std::string* path);
 bool isProcessRunning(const char* exeName);       // e.g. "RocketLeague.exe" (case-insensitive)
 int gameSirXInputSlot();                          // XInput slot of the GameSir (VID 3537), or -1
 bool anyPadInSlot(int slot);                      // any XInput pad in this slot (as gsmacro sees it)
-// GameSir's XInput interface (USB\VID_3537&PID_103D&MI_00) from the PnP tree,
+// GameSir's XInput interface (USB\VID_3537&PID_xxxx&MI_00; the Tarantula
+// reports 103D or 10FF depending on unit/firmware) from the PnP tree,
 // WITHOUT touching XInput (XInput keeps device handles open, which would veto
 // disabling it): -1 not present, 0 present and running, 1 present but disabled/stopped.
 int gameSirXusbState();

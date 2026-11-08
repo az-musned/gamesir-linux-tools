@@ -38,8 +38,8 @@ try {
     $exe = Join-Path $PSScriptRoot 'gsmacro.exe'
     $devs = @(Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
         $_.InstanceId -match '^HID\\VID_054C&PID_(0CE6|0DF2)&MI_03\\' -or   # DualSense / Edge, USB
-        $_.InstanceId -match '^HID\\VID_3537&PID_103D&IG_' -or                # GameSir game-controller HID
-        $_.InstanceId -match '^USB\\VID_3537&PID_103D&MI_00\\'                # GameSir XInput interface
+        $_.InstanceId -match '^HID\\VID_3537&PID_[0-9A-F]{4}&IG_' -or         # GameSir game-controller HID (103D, 10FF, ...)
+        $_.InstanceId -match '^USB\\VID_3537&PID_[0-9A-F]{4}&MI_00\\'         # GameSir XInput interface
     })
     $ids = @($devs | Select-Object -ExpandProperty InstanceId)
     $present = @($devs | Where-Object { $_.Status -eq 'OK' } | Select-Object -ExpandProperty InstanceId)
@@ -64,8 +64,8 @@ try {
     function Names($list) {
         $n = @()
         if ($list | Where-Object { $_ -match 'VID_054C' }) { $n += 'DualSense' }
-        if ($list | Where-Object { $_ -match 'VID_3537&PID_103D&IG_' }) { $n += 'GameSir' }
-        if ($list | Where-Object { $_ -match 'VID_3537&PID_103D&MI_00' }) { $n += 'GameSir XInput' }
+        if ($list | Where-Object { $_ -match 'VID_3537&PID_[0-9A-F]{4}&IG_' }) { $n += 'GameSir' }
+        if ($list | Where-Object { $_ -match 'VID_3537&PID_[0-9A-F]{4}&MI_00' }) { $n += 'GameSir XInput' }
         if ($n) { $n -join ', ' } else { 'nothing' }
     }
     $hasGameSir = [bool]($present | Where-Object { $_ -match 'VID_3537' })

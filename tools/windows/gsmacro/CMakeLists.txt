@@ -80,6 +80,10 @@ if(GSM_BUILD_GUI)
     add_executable(gsmacro WIN32 app/main_win32.cpp app/gui.cpp app/gsmacro.rc ${IMGUI_CORE}
       ${IMGUI}/backends/imgui_impl_win32.cpp ${IMGUI}/backends/imgui_impl_dx11.cpp)
     target_include_directories(gsmacro PRIVATE ${IMGUI} ${IMGUI}/backends)
+    # No ImGui gamepad navigation: its XInput probe opens the GameSir's XInput
+    # device, which then blocks the player-1 slot fix (Windows can't switch the
+    # pad off while a process holds it open).
+    target_compile_definitions(gsmacro PRIVATE IMGUI_IMPL_WIN32_DISABLE_GAMEPAD)
     target_link_libraries(gsmacro PRIVATE gsm_win d3d11 dxgi d3dcompiler dwmapi)
     if(MINGW)
       target_link_options(gsmacro PRIVATE -municode)

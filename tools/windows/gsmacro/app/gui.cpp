@@ -231,7 +231,7 @@ void App::backgroundTick() {
     }
     if (virtualSlot_ < 0) virtualSlot_ = virtualPadSlot(&live_);
     slotWarn_ = virtualSlot_ > 0;
-    if (slotWarn_) autoStatus_ = "Virtual pad is in XInput slot " + std::to_string(virtualSlot_) + ", not player 1 - restart gsmacro (tray > Exit, then start it)";
+    if (slotWarn_) autoStatus_ = "Virtual pad is in XInput slot " + std::to_string(virtualSlot_) + ", not player 1 - restart the PC (Steam and other apps keep the GameSir open, so Windows can only free slot 0 at login)";
 
     // The installer could not hide the controller yet (no pad plugged in, or
     // HidHide needed the restart first): do it once per start, a few seconds
